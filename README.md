@@ -25,9 +25,10 @@ Browser mic ──► Web Speech API (live transcript)      Typed question ─�
                     Answer streams into the record, shown on screen
 ```
 
-- **Speech-to-text** uses the browser's built-in Web Speech API — no audio keys, works in Chrome/Edge.
-- **Question detection** ([`src/lib/isQuestion.ts`](src/lib/isQuestion.ts)) decides, per utterance, whether it gets sent to Claude or just recorded as text.
-- **Answers** come from Claude, which reads your attached files (PDFs and images natively, text/markdown/code as text).
+- **Speech-to-text** uses the browser's built-in Web Speech API — no audio keys, works in Chrome/Edge. It **auto-detects English vs. Filipino/Tagalog** ([`src/lib/detectLang.ts`](src/lib/detectLang.ts)): after each utterance it checks for common Tagalog words and switches the recognizer language for the *next* one if needed — no manual toggle. The **`[EN]`/`[FIL]`** badge in the command bar just shows which one is currently active. (The Web Speech API can only listen in one language at a time, so this adapts going forward rather than detecting both simultaneously — it can't un-garble an utterance recognized in the wrong language after the fact.)
+- **Question detection** ([`src/lib/isQuestion.ts`](src/lib/isQuestion.ts)) recognizes English and Filipino/Tagalog question words (plus the Tagalog "ba" particle) to decide, per utterance, whether it gets sent to Claude or just recorded as text.
+- **Language**: questions can be asked in English, Filipino/Tagalog, or a Taglish mix — Claude understands either and answers in English by default (see [`server/prompts.js`](server/prompts.js)).
+- **Supported attachments**: PDF and images (native, read directly by Claude); `.docx` (text extracted via [mammoth](https://www.npmjs.com/package/mammoth) — detected by extension too, since browsers don't always report the right MIME type); plain-text formats (`.txt`, `.md`, `.csv`, `.json`, code, …). Legacy `.doc` isn't supported (mammoth only reads the modern zip-based format) and gets a clear message asking you to re-save as `.docx` or PDF; other unrecognized binary formats get flagged the same way instead of being sent as garbled bytes.
 - The backend holds your API key so it's never exposed to the browser.
 - Attached files are **prompt-cached**, so repeated questions are fast and cheap.
 - Attached files are **stored in Supabase Storage**, so they survive server restarts, and can be listed, renamed, or deleted from the UI at any time.
@@ -139,7 +140,7 @@ Then open **http://localhost:3000**.
 
 1. **Attach files** — click **`[+]`** in the command bar (or **`[+ Insert]`**
    in the file-list drawer) to pick files, or drag & drop onto the drawer
-   (PDF, images, `.txt`, `.md`, `.csv`, `.json`, code…).
+   (PDF, images, `.docx`, `.txt`, `.md`, `.csv`, `.json`, code…).
 2. **Open the file list** — click **`[≡]`** in the command bar to slide out
    the drawer. Check individual files or **Select all**, then **Delete
    selected** for a bulk delete; `[edit]` renames a file in place (Enter to
@@ -160,6 +161,10 @@ Then open **http://localhost:3000**.
    automatically and Claude is asked "What does this screenshot show?" right
    away — no extra steps. Requires a browser that supports screen capture
    (Chrome/Edge/Firefox on desktop); the button is disabled otherwise.
+6. **Speak in Filipino/Tagalog** — just talk; no setup needed. The **`[EN]`/`[FIL]`**
+   badge next to the mic button shows what it's currently listening for and
+   switches on its own as your speech shifts between languages. Either way,
+   Claude understands the question and answers in English.
 
 ## Scripts
 
@@ -184,3 +189,29 @@ Then open **http://localhost:3000**.
 - Max upload size is 25 MB per file.
 - Chrome needs an internet connection for speech recognition, and requires
   **HTTPS** for the mic on any real domain (`localhost` is exempt).
+
+## Managing API cost
+
+Every question resends **all** currently attached files as context — that's
+what lets Claude answer from them, but it also means cost scales with what's
+attached, not with what the question is actually about.
+
+- **Watch the terminal.** Every answer logs a line like
+  `[ask] input=16 cache_write=0 cache_read=13049 output=14 ~$0.0043` — token
+  counts plus a rough (deliberately overestimated) dollar cost. If
+  `cache_read` is near zero on a question you expect to be a repeat, the
+  attachment cache isn't being hit — see below.
+- **Prompt caching (`server/services/claude.service.js`)** caches the whole
+  attachment set as one block with a **1-hour TTL**: the first question after
+  attachments change pays a cache-write premium (2x base price), every
+  question after that within the hour reads from cache at **~0.1x** price
+  instead of full price. Two things break this: attaching/removing/renaming
+  a file (changes the cached content, forces a fresh write) and letting more
+  than an hour pass between questions.
+- **Remove attachments you don't need for the current line of questions** —
+  cost is proportional to everything attached, not just what's relevant. A
+  large `.docx` sitting attached "just in case" gets paid for on every single
+  question, whether or not it's used.
+- **Ask follow-ups in the same session** rather than spacing them out — they
+  land inside the 1-hour cache window and cost a fraction of a fresh
+  question.

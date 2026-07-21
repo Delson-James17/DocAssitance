@@ -66,7 +66,7 @@ export default function App() {
     [ask, addNote],
   );
 
-  const { supported, listening, interim, toggle } =
+  const { supported, listening, interim, activeLang, toggle } =
     useSpeechRecognition(onFinalUtterance);
 
   const busy = record.some((e) => e.kind === "qa" && e.pending);
@@ -79,8 +79,8 @@ export default function App() {
     setScreenshotBusy(true);
     try {
       const file = await captureScreenshot();
-      await upload([file]);
-      ask("What does this screenshot show?");
+      const attached = await upload([file]);
+      if (attached) ask("What does this screenshot show?");
     } catch (err) {
       const cancelled =
         err instanceof DOMException &&
@@ -124,6 +124,7 @@ export default function App() {
           busy={busy}
           interim={interim}
           onToggleMic={toggle}
+          speechLang={activeLang}
           record={record}
           onAsk={ask}
           onDownload={() => downloadTranscript(record)}

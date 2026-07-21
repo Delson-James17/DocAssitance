@@ -421,6 +421,18 @@ header h1 .caret {
   color: var(--green);
 }
 
+.lang-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.85rem;
+  padding: 0.55rem 0.6rem;
+  cursor: default;
+  user-select: none;
+}
+
 /* Status pill */
 .status {
   font-size: 0.72rem;

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { detectSpeechLang, type SpeechLang } from "../lib/detectLang";
 
 // --- Minimal local typings for the Web Speech API --------------------------
 // The Web Speech API isn't a stable standard, so we declare just what we use
@@ -47,11 +48,17 @@ interface UseSpeechRecognition {
   listening: boolean;
   interim: string;
   finalText: string;
+  /** Which language the recognizer is currently listening for — adapts
+   * automatically based on what gets transcribed (see detectLang.ts). */
+  activeLang: SpeechLang;
   toggle: () => void;
 }
 
 // Continuously transcribes speech and calls `onFinalUtterance` for each
-// completed sentence.
+// completed sentence. Automatically switches between English and Filipino
+// recognition based on the language each utterance looks like — the Web
+// Speech API can only listen in one language at a time, so this adapts
+// going forward rather than detecting both simultaneously.
 export function useSpeechRecognition(
   onFinalUtterance: (utterance: string) => void,
 ): UseSpeechRecognition {
@@ -59,6 +66,7 @@ export function useSpeechRecognition(
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState("");
   const [finalText, setFinalText] = useState("");
+  const [activeLang, setActiveLang] = useState<SpeechLang>("en-US");
 
   const recognitionRef = useRef<Recognition | null>(null);
   const listeningRef = useRef(false);
@@ -73,7 +81,7 @@ export function useSpeechRecognition(
     const recognition = new Ctor();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = "en-US";
+    recognition.lang = activeLang;
 
     recognition.onresult = (event) => {
       let interimText = "";
@@ -83,7 +91,13 @@ export function useSpeechRecognition(
         if (result.isFinal) {
           setFinalText((prev) => prev + text + " ");
           const utterance = text.trim();
-          if (utterance) callbackRef.current(utterance);
+          if (utterance) {
+            callbackRef.current(utterance);
+            // Adapt the recognition language for the *next* utterance based
+            // on what this one looked like.
+            const detected = detectSpeechLang(utterance);
+            setActiveLang((current) => (detected !== current ? detected : current));
+          }
         } else {
           interimText += text;
         }
@@ -103,12 +117,20 @@ export function useSpeechRecognition(
     };
 
     recognitionRef.current = recognition;
+    setInterim("");
+
+    // A language switch mid-session replaces the recognizer — if we were
+    // already listening, keep going seamlessly on the new one instead of
+    // dropping back to idle and making the user click Start again.
+    if (listeningRef.current) {
+      recognition.start();
+    }
+
     return () => {
-      listeningRef.current = false;
       recognition.onend = null;
       recognition.stop();
     };
-  }, []);
+  }, [activeLang]);
 
   const toggle = useCallback(() => {
     const recognition = recognitionRef.current;
@@ -128,5 +150,5 @@ export function useSpeechRecognition(
     }
   }, []);
 
-  return { supported, listening, interim, finalText, toggle };
+  return { supported, listening, interim, finalText, activeLang, toggle };
 }

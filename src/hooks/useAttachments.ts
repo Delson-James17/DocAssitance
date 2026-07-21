@@ -14,7 +14,10 @@ function formatMB(bytes: number): string {
 
 interface UseAttachments {
   files: Attachment[];
-  upload: (list: FileList | File[] | null) => Promise<void>;
+  // Resolves to whether anything actually got uploaded — callers that chain
+  // an action onto the upload (e.g. "attach this screenshot, then ask about
+  // it") need to know it didn't silently no-op (oversized, rejected, etc).
+  upload: (list: FileList | File[] | null) => Promise<boolean>;
   remove: (id: string) => Promise<void>;
   removeMany: (ids: string[]) => Promise<void>;
   rename: (id: string, name: string) => Promise<void>;
@@ -32,7 +35,7 @@ export function useAttachments(): UseAttachments {
 
   const upload = useCallback(async (list: FileList | File[] | null) => {
     const requested = list ? Array.from(list) : [];
-    if (requested.length === 0) return;
+    if (requested.length === 0) return false;
 
     // Reject oversized files here rather than letting the request start —
     // once Multer's limit trips mid-upload the socket gets torn down before
@@ -45,12 +48,14 @@ export function useAttachments(): UseAttachments {
           tooBig.map((f) => `${f.name} (${formatMB(f.size)})`).join("\n"),
       );
     }
-    if (uploadable.length === 0) return;
+    if (uploadable.length === 0) return false;
 
     try {
       setFiles(await uploadAttachments(uploadable));
+      return true;
     } catch (err) {
       alert(err instanceof Error ? err.message : "Upload failed.");
+      return false;
     }
   }, []);
 

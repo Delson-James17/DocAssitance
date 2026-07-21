@@ -7,6 +7,7 @@ interface Props {
   busy: boolean;
   interim: string;
   onToggleMic: () => void;
+  speechLang: "en-US" | "fil-PH";
   record: RecordEntry[];
   onAsk: (question: string) => void;
   onDownload: () => void;
@@ -25,6 +26,7 @@ export function Console({
   busy,
   interim,
   onToggleMic,
+  speechLang,
   record,
   onAsk,
   onDownload,
@@ -132,6 +134,13 @@ export function Console({
         >
           {listening ? "⏸" : "▶"}
         </button>
+
+        <span
+          className="lang-badge"
+          title={`Auto-detected speech language: ${speechLang === "en-US" ? "English" : "Filipino"} — adapts automatically as you talk`}
+        >
+          [{speechLang === "en-US" ? "EN" : "FIL"}]
+        </span>
 
         <input
           className="cmd-input"

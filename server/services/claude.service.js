@@ -22,7 +22,15 @@ export function createClaudeService(client = new Anthropic()) {
 
     if (content.length > 0) {
       const last = content.length - 1;
-      content[last] = { ...content[last], cache_control: { type: "ephemeral" } };
+      // 1h TTL costs more to write (2x vs 1.25x base price) but survives
+      // the gaps between questions that a real conversation actually has —
+      // the default 5-minute TTL expires between most back-and-forth,
+      // forcing a full-price re-write on every question instead of a cheap
+      // cache read.
+      content[last] = {
+        ...content[last],
+        cache_control: { type: "ephemeral", ttl: "1h" },
+      };
     }
 
     content.push({ type: "text", text: `Question: ${question}` });

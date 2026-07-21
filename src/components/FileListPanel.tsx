@@ -5,7 +5,7 @@ interface Props {
   files: Attachment[];
   open: boolean;
   onInsertClick: () => void;
-  onUpload: (list: FileList | File[] | null) => Promise<void>;
+  onUpload: (list: FileList | File[] | null) => Promise<boolean>;
   onRemove: (id: string) => Promise<void>;
   onRemoveMany: (ids: string[]) => Promise<void>;
   onRename: (id: string, name: string) => Promise<void>;

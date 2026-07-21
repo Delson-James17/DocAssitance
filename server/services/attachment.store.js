@@ -32,8 +32,8 @@ export function createAttachmentStore() {
   })();
 
   /** Content block + display metadata for one stored file. */
-  function toEntry(f) {
-    return { id: f.id, name: f.name, block: fileToBlock(f) };
+  async function toEntry(f) {
+    return { id: f.id, name: f.name, block: await fileToBlock(f) };
   }
 
   return {
@@ -56,7 +56,7 @@ export function createAttachmentStore() {
       } catch (err) {
         console.warn(`[attachments] Not persisted to Supabase (kept in memory): ${err.message}`);
       }
-      return toEntry(stored);
+      return await toEntry(stored);
     },
 
     async remove(id) {
@@ -77,7 +77,7 @@ export function createAttachmentStore() {
       const f = files.get(id);
       if (!f) return null;
       const name = newName.trim();
-      if (!name || name === f.name) return toEntry(f);
+      if (!name || name === f.name) return await toEntry(f);
 
       try {
         await storage.rename({ id: f.id, oldName: f.name, newName: name });
@@ -86,13 +86,13 @@ export function createAttachmentStore() {
       }
       const updated = { ...f, name };
       files.set(id, updated);
-      return toEntry(updated);
+      return await toEntry(updated);
     },
 
     /** Content blocks in attachment order (for sending to Claude). */
     async blocks() {
       await ready;
-      return [...files.values()].map((f) => fileToBlock(f));
+      return Promise.all([...files.values()].map((f) => fileToBlock(f)));
     },
 
     /** `{ id, name }` for every current attachment, in attachment order. */
