@@ -102,8 +102,12 @@
   background: var(--border-bright);
 }
 
+html {
+  overflow-x: hidden;
+}
 body {
   margin: 0;
+  overflow-x: hidden;
   font-family: "Cascadia Mono", "Cascadia Code", Consolas, "Lucida Console",
     "Courier New", monospace;
   font-size: 14px;
@@ -338,6 +342,10 @@ header h1 .caret {
   color: var(--yellow);
   border-color: var(--yellow);
 }
+.src-tag.saved {
+  color: var(--green);
+  border-color: var(--green);
+}
 
 /* ---------- Console panel ---------- */
 .console-panel {
@@ -401,7 +409,7 @@ header h1 .caret {
   overflow-y: auto;
   padding: 0.8rem;
   display: flex;
-  flex-direction: column-reverse;
+  flex-direction: column;
   gap: 0.8rem;
 }
 .scrollback-empty {
@@ -722,6 +730,82 @@ input[type="checkbox"] {
   font-size: 0.82em;
 }
 
+/* ---------- Saved Q&A drawer ---------- */
+.qa-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.7rem 0.8rem;
+  border-bottom: 1px dashed var(--border);
+  flex-shrink: 0;
+}
+.qa-form .edit-input,
+.qa-form textarea.edit-input {
+  width: 100%;
+}
+textarea.qa-answer-input {
+  font-family: inherit;
+  resize: vertical;
+  line-height: 1.5;
+}
+.qa-form .term-btn {
+  align-self: flex-start;
+}
+.qa-hint {
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.qa-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.qa-item {
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px dotted var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.qa-item:last-child {
+  border-bottom: none;
+}
+.qa-item.busy {
+  opacity: 0.5;
+}
+.qa-item .qa-form {
+  padding: 0;
+  border-bottom: none;
+}
+.qa-item-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.qa-question {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--bright);
+}
+.qa-question::before {
+  content: "Q: ";
+  color: var(--green);
+}
+.qa-answer {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+.qa-answer::before {
+  content: "A: ";
+  color: var(--muted);
+}
+
 .muted {
   color: var(--muted);
 }
@@ -741,6 +825,7 @@ input[type="checkbox"] {
     flex-direction: column;
     height: auto;
     max-height: none;
+    margin: 0.7rem;
   }
   .console-body {
     flex-direction: column;
@@ -767,5 +852,56 @@ input[type="checkbox"] {
   }
   .filelist-inner {
     width: auto;
+  }
+
+  .term-app {
+    margin: 0;
+    border-left: none;
+    border-right: none;
+  }
+  header {
+    padding: 0.8rem 0.9rem 0.25rem;
+  }
+
+  /* Title bar: the min/max/close spans (_, □, ×) are decorative only —
+     nothing handles clicks on them — so drop just those rather than fight
+     for space with the functional theme toggle and the long C:\ path.
+     (theme-toggle is a sibling <button> inside the same .win-controls
+     wrapper, so it must stay untouched.) */
+  .title-bar .title-text {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .win-controls span {
+    display: none;
+  }
+
+  /* Header action row (AI toggle, Download, Clear, Sample Q&A, status): wrap
+     instead of overflowing off the right edge of the screen. Giving the
+     actions group the full row width (flex-basis: 100%) is what lets its
+     own flex-wrap actually wrap the buttons instead of just overflowing as
+     one unbroken block. */
+  .panel-head {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+  .panel-head-actions {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    row-gap: 0.4rem;
+  }
+
+  /* Command bar: keep the icon row together and push the text input onto
+     its own full-width line below it, instead of squeezing every control
+     into one row until the input has no usable width left. */
+  .command-bar {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+  .cmd-input {
+    order: 1;
+    flex-basis: 100%;
   }
 }

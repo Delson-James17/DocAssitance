@@ -4,10 +4,12 @@ import { fileURLToPath } from "url";
 
 import { createAttachmentStore } from "./services/attachment.store.js";
 import { createClaudeService } from "./services/claude.service.js";
+import { createQaStore } from "./services/qa.store.js";
 import { createAttachmentsController } from "./http/attachments.controller.js";
 import { createAskController } from "./http/ask.controller.js";
 import { createSearchController } from "./http/search.controller.js";
 import { createFaqController } from "./http/faq.controller.js";
+import { createQaController } from "./http/qa.controller.js";
 import { createApiRouter } from "./http/routes.js";
 import { errorHandler } from "./http/error-handler.js";
 
@@ -21,11 +23,13 @@ const distDir = path.join(rootDir, "dist");
  * @param {{
  *   store?: ReturnType<typeof createAttachmentStore>,
  *   claude?: ReturnType<typeof createClaudeService>,
+ *   qaStore?: ReturnType<typeof createQaStore>,
  * }} [deps]
  */
 export function createApp({
   store = createAttachmentStore(),
   claude = createClaudeService(),
+  qaStore = createQaStore(),
 } = {}) {
   const app = express();
   app.use(express.json());
@@ -39,7 +43,8 @@ export function createApp({
   const ask = createAskController({ store, claude });
   const search = createSearchController({ store });
   const faq = createFaqController({ store });
-  app.use("/api", createApiRouter({ attachments, ask, search, faq }));
+  const qa = createQaController(qaStore);
+  app.use("/api", createApiRouter({ attachments, ask, search, faq, qa }));
 
   // SPA fallback: any non-API route serves the built index.html.
   app.get(/^(?!\/api\/).*/, (_req, res) => {

@@ -1,0 +1,6 @@
+question,answer
+What is Voice Doc Assistant?,A voice-driven app that answers questions from files you attach — talk or type
+How do I attach a file?,Click the [+] button in the command bar
+What file types are supported?,"PDF and images are read directly by Claude; .docx, .txt, .md, .csv, .json, and code files have their text extracted; legacy .doc is not supported."
+How do I turn off AI to avoid using tokens?,Click the AI: ON button at the top of the console to switch it to AI: OFF — questions are still answered for free from your attached files or saved Q&A.
+Can I ask questions in Filipino?,Yes — just speak or type in English

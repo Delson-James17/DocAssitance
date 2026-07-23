@@ -1,6 +1,6 @@
 // Thin client for the backend API.
 
-import type { Attachment } from "../types";
+import type { Attachment, QaEntry } from "../types";
 
 // Must match server/config.js's maxFileBytes. Enforced client-side too: a
 // file this large sent over multipart can hit Multer's limit mid-stream,
@@ -45,6 +45,72 @@ export async function renameAttachment(id: string, name: string): Promise<Attach
 
 export async function clearAttachments(): Promise<void> {
   await fetch("/api/attachments", { method: "DELETE" });
+}
+
+async function unwrapQa(res: Response): Promise<QaEntry[]> {
+  const data = (await res.json().catch(() => ({}))) as {
+    entries?: QaEntry[];
+    error?: string;
+  };
+  if (!res.ok || data.error) {
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return data.entries ?? [];
+}
+
+export async function listQa(): Promise<QaEntry[]> {
+  return unwrapQa(await fetch("/api/qa"));
+}
+
+export async function addQa(question: string, answer: string): Promise<QaEntry[]> {
+  return unwrapQa(
+    await fetch("/api/qa", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, answer }),
+    }),
+  );
+}
+
+export async function updateQa(
+  id: string,
+  fields: { question?: string; answer?: string },
+): Promise<QaEntry[]> {
+  return unwrapQa(
+    await fetch(`/api/qa/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fields),
+    }),
+  );
+}
+
+export async function removeQa(id: string): Promise<QaEntry[]> {
+  return unwrapQa(await fetch(`/api/qa/${encodeURIComponent(id)}`, { method: "DELETE" }));
+}
+
+export interface ImportQaResult {
+  imported: number;
+  entries: QaEntry[];
+}
+
+// Bulk-adds many question/answer pairs in one request (see qaImport.ts for
+// the .csv/.json parsing that produces these pairs).
+export async function importQa(
+  pairs: { question: string; answer: string }[],
+): Promise<ImportQaResult> {
+  const res = await fetch("/api/qa/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ entries: pairs }),
+  });
+  const data = (await res.json().catch(() => ({}))) as Partial<ImportQaResult> & {
+    error?: string;
+  };
+  if (!res.ok || data.error) {
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return { imported: data.imported ?? 0, entries: data.entries ?? [] };
 }
 
 export interface AskHandlers {

@@ -20,6 +20,13 @@ function SourceTag({ source }: { source: QaSource }) {
       </span>
     );
   }
+  if (source === "saved") {
+    return (
+      <span className="src-tag saved" title="Matched a manually-curated Q&A entry — no tokens spent, no document search involved">
+        saved
+      </span>
+    );
+  }
   return null;
 }
 
@@ -45,6 +52,9 @@ interface Props {
   filesOpen: boolean;
   onToggleFiles: () => void;
   onInsertClick: () => void;
+  qaCount: number;
+  qaOpen: boolean;
+  onToggleQa: () => void;
 }
 
 export function Console({
@@ -69,6 +79,9 @@ export function Console({
   filesOpen,
   onToggleFiles,
   onInsertClick,
+  qaCount,
+  qaOpen,
+  onToggleQa,
 }: Props) {
   const [typed, setTyped] = useState("");
   const status = !listening ? "idle" : busy ? "thinking" : "listening";
@@ -247,6 +260,14 @@ export function Console({
           onClick={onToggleFiles}
         >
           [≡{fileCount > 0 ? ` ${fileCount}` : ""}]
+        </button>
+
+        <button
+          className={`square-btn${qaOpen ? " active" : ""}`}
+          title="Saved Q&A — manually-curated answers, checked before document search"
+          onClick={onToggleQa}
+        >
+          [?{qaCount > 0 ? ` ${qaCount}` : ""}]
         </button>
       </div>
     </section>

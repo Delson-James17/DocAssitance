@@ -1,7 +1,9 @@
 import { useCallback, useRef, useState } from "react";
 import { Console } from "./components/Console";
 import { FileListPanel } from "./components/FileListPanel";
+import { QaPanel } from "./components/QaPanel";
 import { useAttachments } from "./hooks/useAttachments";
+import { useQa } from "./hooks/useQa";
 import { useSpeechRecognition } from "./hooks/useSpeechRecognition";
 import { useTheme } from "./hooks/useTheme";
 import { askQuestion, fetchFaq, localSearch } from "./lib/api";
@@ -27,9 +29,11 @@ function newId(): string {
 
 export default function App() {
   const { files, upload, remove, removeMany, rename } = useAttachments();
+  const qa = useQa();
   const { theme, toggleTheme } = useTheme();
   const [record, setRecord] = useState<RecordEntry[]>([]);
   const [filesOpen, setFilesOpen] = useState(false);
+  const [qaOpen, setQaOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Persisted kill switch: when off, no question ever reaches the Claude
@@ -82,13 +86,24 @@ export default function App() {
   );
 
   // Every question — typed, spoken, or screenshot-triggered — funnels
-  // through here. Three paths, in order: (1) a near-duplicate of an
-  // earlier question against the same files is answered from cache, no
-  // network call at all; (2) with AI off, a free local keyword search over
-  // already-extracted attachment text; (3) otherwise, ask Claude, and cache
-  // the result for next time.
+  // through here. Four paths, in order: (1) a close match against the
+  // manually-curated Q&A table always wins, regardless of AI/attachments —
+  // it's an exact answer someone wrote on purpose, not an inference over a
+  // document, so it can't be "the unrelated passage" the way a document
+  // search hit can; (2) a near-duplicate of an earlier question against the
+  // same files is answered from cache, no network call at all; (3) with AI
+  // off, a free local keyword search over already-extracted attachment
+  // text; (4) otherwise, ask Claude, and cache the result for next time.
   const ask = useCallback(
     (question: string) => {
+      const savedMatch = qa.entries.find(
+        (e) => similarity(e.question, question) >= DUPLICATE_THRESHOLD,
+      );
+      if (savedMatch) {
+        pushQa({ question, answer: savedMatch.answer, pending: false, source: "saved" });
+        return;
+      }
+
       const fileKey = files.map((f) => f.id).slice().sort().join(",");
 
       const cached = answerCacheRef.current.find(
@@ -140,7 +155,7 @@ export default function App() {
         onError: (message) => patchQa(id, { pending: false, error: message }),
       });
     },
-    [aiEnabled, files, pushQa, patchQa],
+    [aiEnabled, files, qa.entries, pushQa, patchQa],
   );
 
   // Each finished utterance either gets answered (it reads as a question)
@@ -271,6 +286,9 @@ export default function App() {
           filesOpen={filesOpen}
           onToggleFiles={() => setFilesOpen((v) => !v)}
           onInsertClick={() => fileInputRef.current?.click()}
+          qaCount={qa.entries.length}
+          qaOpen={qaOpen}
+          onToggleQa={() => setQaOpen((v) => !v)}
         />
         <FileListPanel
           files={files}
@@ -280,6 +298,14 @@ export default function App() {
           onRemove={remove}
           onRemoveMany={removeMany}
           onRename={rename}
+        />
+        <QaPanel
+          entries={qa.entries}
+          open={qaOpen}
+          onAdd={qa.add}
+          onUpdate={qa.update}
+          onRemove={qa.remove}
+          onImport={qa.importMany}
         />
       </div>
 

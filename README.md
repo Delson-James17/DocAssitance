@@ -35,6 +35,7 @@ Browser mic ──► Web Speech API (live transcript)      Typed question ─�
 - The whole record (notes + questions + answers, in order) can be **downloaded as a `.txt` file**.
 - **Screenshot a screen/window/tab** and it's automatically attached and asked about — no separate "now attach it" step.
 - If no attached file answers a question, Claude falls back to its own general knowledge instead of refusing (see [`server/prompts.js`](server/prompts.js)).
+- **Saved Q&A** (**`[?]`** in the command bar) lets you type your own question/answer pairs and save them — a close match always wins over document search or Claude, so you get a guaranteed-correct, zero-cost answer for anything you've curated, with no risk of an unrelated document passage being surfaced instead. Persisted in Supabase alongside attachments (see Supabase setup below).
 - The UI is styled like a **command-prompt window**.
 
 ## Project layout
@@ -51,6 +52,7 @@ modules with the web layer kept separate from business logic.
 │   ├── services/          Business logic (framework-agnostic)
 │   │   ├── attachment.store.js   Attachment repository (Supabase-backed, in-memory cache)
 │   │   ├── storage.service.js    Supabase Storage wrapper (upload/rename/remove/list)
+│   │   ├── qa.store.js           Saved Q&A repository (Supabase table-backed, in-memory cache)
 │   │   ├── supabase.client.js    Supabase client (null if not configured)
 │   │   ├── file-converter.js     File → Claude content block
 │   │   └── claude.service.js     Claude SDK wrapper
@@ -59,6 +61,7 @@ modules with the web layer kept separate from business logic.
 │       ├── upload.middleware.js  multer config
 │       ├── sse.js                Server-Sent Events helper
 │       ├── attachments.controller.js
+│       ├── qa.controller.js
 │       └── ask.controller.js
 │
 ├── scripts/dev.mjs        Dev launcher (backend + Vite, with o/q shortcuts)
@@ -69,10 +72,12 @@ modules with the web layer kept separate from business logic.
 │   ├── App.tsx            Ties speech/typed input → question → streamed answer together
 │   ├── components/
 │   │   ├── Console.tsx        Question/Answer + scrollback log (notes + Q&A) + command bar
-│   │   └── FileListPanel.tsx  Collapsible drawer: select-all, per-file rename/delete, bulk delete
+│   │   ├── FileListPanel.tsx  Collapsible drawer: select-all, per-file rename/delete, bulk delete
+│   │   └── QaPanel.tsx        Collapsible drawer: add/edit/delete saved Q&A pairs
 │   ├── hooks/
 │   │   ├── useSpeechRecognition.ts   Web Speech API wrapper
-│   │   └── useAttachments.ts         Attachment list + upload/rename/remove state
+│   │   ├── useAttachments.ts         Attachment list + upload/rename/remove state
+│   │   └── useQa.ts                  Saved Q&A list + add/update/remove state
 │   └── lib/               api.ts (backend client), isQuestion.ts, transcript.ts (build/download record), screenshot.ts (screen capture)
 └── .env                   ANTHROPIC_API_KEY + SUPABASE_* (git-ignored)
 ```
@@ -103,21 +108,23 @@ npm run dev
 
 ### Supabase storage setup
 
-Attachments are stored in a Supabase Storage bucket named `attachments` so
-they survive server restarts and can be listed/renamed/deleted from the UI.
+Attachments are stored in a Supabase Storage bucket named `attachments`, and
+saved Q&A pairs in a `qa_entries` table, so both survive server restarts and
+can be managed from the UI.
 
 1. In the Supabase dashboard, open **SQL Editor → New query**, paste in
    [`supabase/setup.sql`](supabase/setup.sql), and run it. It creates the
-   `attachments` bucket and the RLS policies that let the **anon key** (the
-   default) read/write it.
+   `attachments` bucket, the `qa_entries` table, and the RLS policies that
+   let the **anon key** (the default) read/write both.
 2. Alternatively, set `SUPABASE_SERVICE_ROLE_KEY` in `.env` (server-only —
-   **never** expose it to the browser) and skip the script's policy section;
-   the service-role key bypasses Storage RLS entirely.
-3. If Supabase isn't configured at all, the app still runs — attachments just
-   live in memory for that server session, like before.
+   **never** expose it to the browser) and skip the script's policy sections;
+   the service-role key bypasses RLS entirely.
+3. If Supabase isn't configured at all, the app still runs — attachments and
+   saved Q&A just live in memory for that server session, like before.
 
-There's no separate database table — attachment metadata (id, name,
-mimetype, size) is read straight off the Storage object, not a Postgres row.
+Attachment metadata (id, name, mimetype, size) is read straight off the
+Storage object, not a Postgres row — `qa_entries` is the only actual
+database table the app uses.
 
 `npm run dev` runs both servers with keyboard shortcuts:
 
@@ -165,6 +172,21 @@ Then open **http://localhost:3000**.
    badge next to the mic button shows what it's currently listening for and
    switches on its own as your speech shifts between languages. Either way,
    Claude understands the question and answers in English.
+7. **Save your own Q&A** — click **`[?]`** in the command bar to open the
+   Saved Q&A drawer. Type a question and its exact answer, **`+ Save Q&A`**
+   persists it. From then on, asking that question (or a close rewording)
+   answers instantly from what you wrote — shown with a **`saved`** badge —
+   instead of searching attachments or calling Claude. `[edit]`/`[del]`
+   manage entries in place.
+8. **Bulk-import Q&A** — click **`⭱ Import`** in the Saved Q&A drawer and
+   pick a `.csv` (header row `question,answer`) or `.json` file (an array of
+   `{question, answer}` objects, or an object mapping questions to answers).
+   Rows missing either field, or whose question already matches something
+   saved, are skipped automatically — you get a summary of how many were
+   imported vs. skipped either way. Sample files to try it with (or use as a
+   template):
+   [`samples/qa-import-sample.csv`](samples/qa-import-sample.csv),
+   [`samples/qa-import-sample.json`](samples/qa-import-sample.json).
 
 ## Scripts
 
@@ -198,6 +220,11 @@ OFF`**. The setting is saved (`localStorage`), so it stays off across
 reloads until you turn it back on. With it off, Claude is never called —
 but questions still get answered where possible, for free:
 
+- **A close match to a Saved Q&A entry is always free and answered first,**
+  ahead of the cache, local search, or Claude — see **`[?]`** above. It's the
+  most reliable way to guarantee a correct, on-topic answer for a question
+  you know you'll be asked, since it's exactly what you wrote rather than an
+  inference over a document.
 - **Repeat questions are free, AI on or off.** Every answer is cached
   (in memory, per browser tab) against the exact set of attached files it
   was computed from. Asking the same question again — or a close rewording
