@@ -99,3 +99,75 @@ export async function askQuestion(
     }
   }
 }
+
+export interface LocalSearchMatch {
+  file: string;
+  snippet: string;
+  score: number;
+}
+
+export interface LocalSearchResult {
+  keywords: string[];
+  matches: LocalSearchMatch[];
+  searchedFiles: string[];
+  unsearchableFiles: string[];
+}
+
+// Zero-cost keyword search over already-extracted attachment text — never
+// calls Claude, so it works with the AI switched off.
+export async function localSearch(question: string): Promise<LocalSearchResult> {
+  const res = await fetch("/api/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question }),
+  });
+  const data = (await res.json().catch(() => ({}))) as Partial<LocalSearchResult> & {
+    error?: string;
+  };
+  if (!res.ok || data.error) {
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return {
+    keywords: data.keywords ?? [],
+    matches: data.matches ?? [],
+    searchedFiles: data.searchedFiles ?? [],
+    unsearchableFiles: data.unsearchableFiles ?? [],
+  };
+}
+
+export interface FaqPair {
+  file: string;
+  question: string;
+  answer: string;
+}
+
+export interface FaqMedia {
+  file: string;
+  mimetype: string;
+  data: string; // base64
+}
+
+export interface FaqResult {
+  pairs: FaqPair[];
+  media: FaqMedia[];
+  skippedFiles: string[];
+}
+
+// Free, local, heuristic sample-Q&A preview generated from attached text
+// files' headings/sections — never calls Claude. Image attachments come
+// back as `media` (base64) rather than Q&A pairs, since there's no text to
+// pair a question with — just the picture itself.
+export async function fetchFaq(): Promise<FaqResult> {
+  const res = await fetch("/api/faq");
+  const data = (await res.json().catch(() => ({}))) as Partial<FaqResult> & {
+    error?: string;
+  };
+  if (!res.ok || data.error) {
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return {
+    pairs: data.pairs ?? [],
+    media: data.media ?? [],
+    skippedFiles: data.skippedFiles ?? [],
+  };
+}

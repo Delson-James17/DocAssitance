@@ -1,6 +1,28 @@
 import { useState } from "react";
 import type { RecordEntry } from "../types";
 
+type QaSource = Extract<RecordEntry, { kind: "qa" }>["source"];
+
+// Labels where an answer came from — "claude" is the normal (token-costing)
+// path and gets no badge; the other two are free, so they're called out.
+function SourceTag({ source }: { source: QaSource }) {
+  if (source === "cache") {
+    return (
+      <span className="src-tag cache" title="Reused from an earlier answer to this same question — no tokens spent">
+        cached
+      </span>
+    );
+  }
+  if (source === "local") {
+    return (
+      <span className="src-tag local" title="Local keyword search over attached text files — AI is off, no tokens spent">
+        local
+      </span>
+    );
+  }
+  return null;
+}
+
 interface Props {
   supported: boolean;
   listening: boolean;
@@ -10,7 +32,12 @@ interface Props {
   speechLang: "en-US" | "fil-PH";
   record: RecordEntry[];
   onAsk: (question: string) => void;
+  aiEnabled: boolean;
+  onToggleAi: () => void;
   onDownload: () => void;
+  onClear: () => void;
+  onExportFaq: () => void;
+  faqBusy: boolean;
   onScreenshot: () => void;
   screenshotSupported: boolean;
   screenshotBusy: boolean;
@@ -29,7 +56,12 @@ export function Console({
   speechLang,
   record,
   onAsk,
+  aiEnabled,
+  onToggleAi,
   onDownload,
+  onClear,
+  onExportFaq,
+  faqBusy,
   onScreenshot,
   screenshotSupported,
   screenshotBusy,
@@ -62,12 +94,39 @@ export function Console({
         </h2>
         <div className="panel-head-actions">
           <button
+            className={`term-btn ai-toggle${aiEnabled ? "" : " off"}`}
+            title={
+              aiEnabled
+                ? "AI is on — questions are sent to Claude and cost tokens. Click to turn off."
+                : "AI is off — questions are only logged, nothing is sent to Claude (zero cost). Click to turn on."
+            }
+            onClick={onToggleAi}
+          >
+            {aiEnabled ? "◉ AI: ON" : "○ AI: OFF"}
+          </button>
+          <button
             className="term-btn"
             title="Download the whole record as .txt"
             onClick={onDownload}
             disabled={record.length === 0}
           >
             ⭳ Download
+          </button>
+          <button
+            className="link-btn"
+            title="Clear the whole conversation record"
+            onClick={onClear}
+            disabled={record.length === 0}
+          >
+            ✕ Clear
+          </button>
+          <button
+            className="term-btn"
+            title="Preview sample questions & answers this app can read from your attached files — generated locally, no AI used"
+            onClick={onExportFaq}
+            disabled={faqBusy}
+          >
+            {faqBusy ? "⭳ Sample Q&A…" : "⭳ Sample Q&A"}
           </button>
           <span className={`status ${status}`}>{status}</span>
         </div>
@@ -82,7 +141,10 @@ export function Console({
             </div>
           </div>
           <div className="mini-field">
-            <span className="mini-label">Answer</span>
+            <span className="mini-label">
+              Answer
+              {latestQa && <SourceTag source={latestQa.source} />}
+            </span>
             <div className={`mini-box${latestQa?.pending ? " pending" : ""}`}>
               {latestQa?.error ? (
                 <span className="err">⚠ {latestQa.error}</span>
@@ -117,7 +179,7 @@ export function Console({
                     (e.error ? " error" : "")
                   }
                 >
-                  {e.error ? `⚠ ${e.error}` : e.answer}
+                  <SourceTag source={e.source} /> {e.error ? `⚠ ${e.error}` : e.answer}
                 </p>
               </div>
             ),
@@ -145,7 +207,11 @@ export function Console({
         <input
           className="cmd-input"
           placeholder={
-            supported ? "Type a question and press Enter…" : "Type a question…"
+            !aiEnabled
+              ? "AI is off — questions will only be logged…"
+              : supported
+                ? "Type a question and press Enter…"
+                : "Type a question…"
           }
           value={typed}
           onChange={(e) => setTyped(e.target.value)}

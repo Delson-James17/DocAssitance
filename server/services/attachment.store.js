@@ -95,10 +95,22 @@ export function createAttachmentStore() {
       return Promise.all([...files.values()].map((f) => fileToBlock(f)));
     },
 
-    /** `{ id, name }` for every current attachment, in attachment order. */
+    /** `{ id, name, block }` for every attachment (for local, non-AI search). */
+    async entries() {
+      await ready;
+      return Promise.all([...files.values()].map((f) => toEntry(f)));
+    },
+
+    /** `{ id, name, mimetype }` for every current attachment, in attachment order. */
     async list() {
       await ready;
-      return [...files.values()].map(({ id, name }) => ({ id, name }));
+      return [...files.values()].map(({ id, name, mimetype }) => ({ id, name, mimetype }));
+    },
+
+    /** Raw stored file (name/mimetype/buffer) for serving originals — e.g. image previews. */
+    async getRaw(id) {
+      await ready;
+      return files.get(id) ?? null;
     },
 
     async clear() {

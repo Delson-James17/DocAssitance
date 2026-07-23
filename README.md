@@ -192,6 +192,64 @@ Then open **http://localhost:3000**.
 
 ## Managing API cost
 
+**Turn the AI off.** The **`◉ AI: ON`** button at the top of the console
+(next to Download) is a hard kill switch — click it to flip to **`○ AI:
+OFF`**. The setting is saved (`localStorage`), so it stays off across
+reloads until you turn it back on. With it off, Claude is never called —
+but questions still get answered where possible, for free:
+
+- **Repeat questions are free, AI on or off.** Every answer is cached
+  (in memory, per browser tab) against the exact set of attached files it
+  was computed from. Asking the same question again — or a close rewording
+  of it — is answered instantly from that cache instead of spending tokens
+  or (with AI off) re-running a search. Shown with a **`cached`** badge.
+  Changing the attachments invalidates the cache automatically, since the
+  answer no longer applies to the same files.
+- **New questions fall back to local keyword search** (`server/services/local-search.service.js`)
+  over attachments whose text was already extracted at upload time
+  (`.docx`, `.txt`, `.md`, `.csv`, `.json`, code…) — it finds the paragraphs
+  that best match the question's keywords and shows them directly, no
+  Claude call involved. Shown with a **`local`** badge. PDFs and images
+  can't be searched this way (they're sent to Claude as native files and
+  never turned into text) — the app tells you which attachments it couldn't
+  search rather than pretending they don't exist.
+- Screenshots still attach normally with AI off, they just aren't
+  auto-asked-about (a screenshot is an image, so local search can't read
+  it) — turn AI on when you're ready to ask about one.
+
+Use AI-off mode whenever you're done with the expensive path but still want
+answers from documents you've already attached, or whenever you want a hard
+guarantee that nothing in the app can spend from your balance.
+
+**Export sample Q&A.** The **`⭳ Sample Q&A`** button (next to Download)
+downloads an **`.html`** preview of what the app can read well from your
+attached files, generated entirely locally (`server/services/faq.service.js`)
+— no Claude call, no tokens. It scans text-extractable attachments for
+heading-like lines (markdown headings, numbered items, ALL-CAPS section
+labels like `SKILLS`) and pairs each with the content right after it, so you
+can see up front which sections it'll answer accurately. It's HTML rather
+than plain text specifically so attached **images** (like screenshots) can
+be embedded directly in the file and viewed — a `.txt` file can't hold a
+picture. PDFs are listed separately as "not previewable" since they're
+never turned into text or an image locally. The file is self-contained
+(images inlined as base64), so it opens in any browser with no server
+needed.
+
+**Image previews in the app itself.** Attached images (e.g. screenshots)
+now show a small thumbnail directly in the file list drawer (**`[≡]`**), so
+you can see what's attached without needing AI or exporting anything —
+served from the new `GET /api/attachments/:id/raw` endpoint.
+
+**Local search accuracy.** Local search (`server/services/local-search.service.js`)
+ranks matches by how many *distinct* question keywords a passage covers
+first, with rarer/more distinctive keywords weighted above common ones
+repeated throughout a document — so a passage that actually addresses
+several parts of the question outranks one that just repeats a single
+common word many times. Short heading-only paragraphs (e.g. a bare
+`SKILLS` line) are merged with the paragraph right after them before
+scoring, so a heading match still surfaces its real content instead of a
+one-word non-answer.
+
 Every question resends **all** currently attached files as context — that's
 what lets Claude answer from them, but it also means cost scales with what's
 attached, not with what the question is actually about.

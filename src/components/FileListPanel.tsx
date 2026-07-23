@@ -137,6 +137,13 @@ export function FileListPanel({
                     checked={selected.has(file.id)}
                     onChange={() => toggleOne(file.id)}
                   />
+                  {file.mimetype.startsWith("image/") && (
+                    <img
+                      className="file-thumb"
+                      src={`/api/attachments/${encodeURIComponent(file.id)}/raw`}
+                      alt=""
+                    />
+                  )}
                   {editingId === file.id ? (
                     <input
                       className="edit-input"

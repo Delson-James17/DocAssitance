@@ -9,6 +9,16 @@ export function createAttachmentsController(store) {
       res.json({ attachments: await store.list() });
     },
 
+    // Serves an attachment's original bytes — used for image previews in
+    // the UI. Never involved in answering questions (that's blocks()).
+    async raw(req, res) {
+      const file = await store.getRaw(req.params.id);
+      if (!file) return res.status(404).json({ error: "Attachment not found." });
+      res.setHeader("Content-Type", file.mimetype || "application/octet-stream");
+      res.setHeader("Cache-Control", "private, max-age=3600");
+      res.send(file.buffer);
+    },
+
     async upload(req, res) {
       try {
         for (const file of req.files ?? []) {

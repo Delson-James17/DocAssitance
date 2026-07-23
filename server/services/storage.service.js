@@ -54,10 +54,15 @@ async function listAll() {
 
     const { data: files, error: innerErr } = await supabase.storage
       .from(BUCKET)
-      .list(folder.name, { limit: 1 });
+      .list(folder.name, { limit: 10 });
     if (innerErr || !files?.length) continue;
 
-    const file = files[0];
+    // Once a folder's one real object is deleted, Supabase drops in a
+    // ".emptyFolderPlaceholder" marker so the now-empty folder still shows
+    // up in the dashboard — it's bucket housekeeping, not an attachment, so
+    // treat a folder that holds only that marker as deleted, not present.
+    const file = files.find((f) => f.name !== ".emptyFolderPlaceholder");
+    if (!file) continue;
     const path = `${folder.name}/${file.name}`;
     const { data: blob, error: dlErr } = await supabase.storage
       .from(BUCKET)

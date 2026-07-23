@@ -6,6 +6,8 @@ import { createAttachmentStore } from "./services/attachment.store.js";
 import { createClaudeService } from "./services/claude.service.js";
 import { createAttachmentsController } from "./http/attachments.controller.js";
 import { createAskController } from "./http/ask.controller.js";
+import { createSearchController } from "./http/search.controller.js";
+import { createFaqController } from "./http/faq.controller.js";
 import { createApiRouter } from "./http/routes.js";
 import { errorHandler } from "./http/error-handler.js";
 
@@ -35,7 +37,9 @@ export function createApp({
   // API
   const attachments = createAttachmentsController(store);
   const ask = createAskController({ store, claude });
-  app.use("/api", createApiRouter({ attachments, ask }));
+  const search = createSearchController({ store });
+  const faq = createFaqController({ store });
+  app.use("/api", createApiRouter({ attachments, ask, search, faq }));
 
   // SPA fallback: any non-API route serves the built index.html.
   app.get(/^(?!\/api\/).*/, (_req, res) => {
