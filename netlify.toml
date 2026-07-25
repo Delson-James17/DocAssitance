@@ -7,4 +7,9 @@
   node_bundler = "esbuild"
 
 [build.environment]
-  NODE_VERSION = "20"
+  # @supabase/supabase-js eagerly constructs an internal Realtime client
+  # (even though this app never uses realtime subscriptions), which needs
+  # the native `WebSocket` global — stable only from Node 22 onward. Pinning
+  # below 22 here reproducibly breaks every /api/qa* call with a 502
+  # ("Node.js detected but native WebSocket not found").
+  NODE_VERSION = "22"
