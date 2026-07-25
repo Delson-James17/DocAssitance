@@ -135,6 +135,54 @@ npm start         # backend serves dist/ + the API on one port
 
 Then open **http://localhost:3000**.
 
+### Deploying to Netlify
+
+Netlify only serves static files by default — it can't run the persistent
+Express server in `server/`. Deploying `dist/` alone (with no other setup)
+builds and serves the frontend fine, but every `/api/*` call fails, since
+there's nothing on the other end to answer them.
+
+[`netlify.toml`](netlify.toml) and [`netlify/functions/`](netlify/functions)
+solve this by re-implementing the same two API routes as **Netlify
+Functions** — `ask.js` and `qa.js` — which both import and reuse the exact
+same [`server/services/`](server/services) modules (`claude.service.js`,
+`qa.store.js`) that the Express backend uses for local dev; only the HTTP
+glue differs (Web-standard `Request`/`Response` instead of Express's
+`req`/`res`). `/api/ask` streams Claude's answer through a `ReadableStream`
+response body — the same SSE wire format either way, so the frontend doesn't
+need to know or care which backend answered it.
+
+1. **Connect the repo** in the Netlify dashboard (or `netlify deploy` via
+   the CLI). Netlify auto-detects `netlify.toml`'s build command
+   (`npm run build`), publish directory (`dist`), and functions directory
+   (`netlify/functions`) — no manual build-settings changes needed.
+2. **Set environment variables** — Site configuration → Environment
+   variables. `.env` is git-ignored and never deployed, so these must be set
+   here instead:
+   - `ANTHROPIC_API_KEY`
+   - `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` (or the `SUPABASE_*`
+     aliases — see [Supabase setup](#supabase-setup) above)
+3. **Deploy.** Both `/api/ask` and `/api/qa*` are routed straight to the
+   matching function via each file's exported `config.path` — no redirect
+   rules needed.
+
+To try the whole thing locally exactly as Netlify will run it — before
+pushing a change and finding out it's broken in production — run
+`npx netlify dev` (already a devDependency). It builds the app, loads
+`.env`, and serves everything (frontend + both functions) on
+**http://localhost:8888**.
+
+**Known limits** (Netlify's, not this app's): streaming functions have a
+response-time ceiling that varies by plan (10s+, longer on paid tiers) — an
+answer capped at `maxAnswerTokens` (see `server/config.js`) normally
+finishes well inside that, but if you raise the cap enough to hit timeouts,
+either lower it back down or check your plan's function duration limit.
+Because each request may hit a different function instance, there's no
+shared in-memory cache between invocations the way the Express server has
+within one process — every `qa.js` call re-syncs from Supabase instead, so
+correctness holds, it's just an extra round trip Netlify's Express
+counterpart doesn't pay.
+
 ## Using it
 
 1. **Talk, or ask a question** — click the round **▶** button and just talk.
@@ -187,13 +235,18 @@ Then open **http://localhost:3000**.
   (`model`, currently `claude-sonnet-5`) and [`server/prompts.js`](server/prompts.js)
   (`SYSTEM_PROMPT`). It defaults to short, conversational answers.
 - **Saved-Q&A matching** ([`src/lib/qaMatch.ts`](src/lib/qaMatch.ts)) is
-  keyword-coverage based for longer questions (robust to rewording — a
-  question needs to cover most of a saved question's distinct keywords, not
-  match it word-for-word), but falls back to whole-sentence similarity for
-  short, generic questions (fewer than 3 content keywords after common words
-  are stripped) — otherwise a short question like "Tell me about yourself?"
-  can lose almost all its words to filtering and match the wrong saved entry
-  by sharing just one leftover word with it.
+  keyword-coverage based: a saved question needs to cover most of the asked
+  question's distinct keywords (common filler words like "what", "is",
+  "tell", "me" are stripped first and never compared), not match it
+  word-for-word — robust to rewording and voice-transcription variance.
+  Questions with only one or two real keywords left after filtering (e.g.
+  "What is AWS?" → just "aws") require *all* of them to match instead of a
+  partial ratio — with that little to go on, partial credit isn't a
+  meaningful signal, and demanding an exact keyword hit is what stops an
+  unrelated saved question from winning just because it shares one common
+  word. If a short saved question doesn't reliably match, double-check its
+  exact wording in the drawer — matching only looks at the literal words
+  saved, so "your self" (two words) won't match a query for "yourself".
 - Chrome needs an internet connection for speech recognition, and requires
   **HTTPS** for the mic on any real domain (`localhost` is exempt).
 

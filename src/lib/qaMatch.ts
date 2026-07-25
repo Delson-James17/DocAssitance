@@ -15,6 +15,7 @@
 // words before the real subject is even considered, which is enough
 // overlap to falsely "match" two completely unrelated questions.
 
+import { similarity } from "./dedupe";
 import type { QaEntry } from "../types";
 
 const STOPWORDS = new Set([
@@ -102,5 +103,22 @@ export function matchSavedQa(entries: QaEntry[], question: string): QaEntry | nu
     .filter((s) => s.coverage / keywords.length >= requiredRatio)
     .sort((a, b) => b.coverage - a.coverage || b.weighted - a.weighted);
 
-  return scored[0]?.entry ?? null;
+  if (scored.length === 0) return null;
+
+  // Keyword coverage can land on a genuine tie: two short questions can
+  // share their one real keyword ("yourself") while being totally
+  // different questions, once the words that actually distinguish them
+  // ("tell me about" vs. "where do you see ... in 5 years") were stripped
+  // as filler and never compared. Only *among candidates already past the
+  // coverage bar above* — never as a way for a zero-coverage candidate to
+  // qualify — break the tie with whole-sentence similarity, which does
+  // weigh those filler words back in.
+  const top = scored[0];
+  const tied = scored.filter((s) => s.coverage === top.coverage && s.weighted === top.weighted);
+  if (tied.length === 1) return tied[0].entry;
+
+  tied.sort(
+    (a, b) => similarity(b.entry.question, question) - similarity(a.entry.question, question),
+  );
+  return tied[0].entry;
 }
