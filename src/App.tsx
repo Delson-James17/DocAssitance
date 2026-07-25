@@ -1,22 +1,17 @@
 import { useCallback, useRef, useState } from "react";
 import { Console } from "./components/Console";
-import { FileListPanel } from "./components/FileListPanel";
 import { QaPanel } from "./components/QaPanel";
-import { useAttachments } from "./hooks/useAttachments";
 import { useQa } from "./hooks/useQa";
 import { useSpeechRecognition } from "./hooks/useSpeechRecognition";
 import { useTheme } from "./hooks/useTheme";
-import { askQuestion, fetchFaq, localSearch } from "./lib/api";
+import { askQuestion } from "./lib/api";
 import { DUPLICATE_THRESHOLD, similarity } from "./lib/dedupe";
-import { downloadFaq } from "./lib/faqExport";
 import { isQuestion } from "./lib/isQuestion";
-import { formatLocalSearchAnswer } from "./lib/localSearchAnswer";
-import { captureScreenshot, screenshotSupported } from "./lib/screenshot";
+import { matchSavedQa } from "./lib/qaMatch";
 import { downloadTranscript } from "./lib/transcript";
 import type { RecordEntry } from "./types";
 
 interface CachedAnswer {
-  fileKey: string;
   question: string;
   answer: string;
 }
@@ -28,13 +23,10 @@ function newId(): string {
 }
 
 export default function App() {
-  const { files, upload, remove, removeMany, rename } = useAttachments();
   const qa = useQa();
   const { theme, toggleTheme } = useTheme();
   const [record, setRecord] = useState<RecordEntry[]>([]);
-  const [filesOpen, setFilesOpen] = useState(false);
   const [qaOpen, setQaOpen] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Persisted kill switch: when off, no question ever reaches the Claude
   // API, so it's a hard guarantee against burning tokens, not just a UI
@@ -59,9 +51,9 @@ export default function App() {
     ]);
   }, []);
 
-  // Answers already paid for, keyed to the exact set of attached files they
-  // were computed against (an id-set fingerprint, not just names) — if the
-  // attachments change, cached answers no longer apply and are skipped.
+  // Claude answers already paid for — reusing them for a repeat (or close
+  // rewording of a) question is free whether AI is currently on or off,
+  // since no new call is made either way.
   const answerCacheRef = useRef<CachedAnswer[]>([]);
 
   const pushQa = useCallback(
@@ -85,31 +77,25 @@ export default function App() {
     [],
   );
 
-  // Every question — typed, spoken, or screenshot-triggered — funnels
-  // through here. Four paths, in order: (1) a close match against the
-  // manually-curated Q&A table always wins, regardless of AI/attachments —
-  // it's an exact answer someone wrote on purpose, not an inference over a
-  // document, so it can't be "the unrelated passage" the way a document
-  // search hit can; (2) a near-duplicate of an earlier question against the
-  // same files is answered from cache, no network call at all; (3) with AI
-  // off, a free local keyword search over already-extracted attachment
-  // text; (4) otherwise, ask Claude, and cache the result for next time.
+  // Every question — typed, spoken, or otherwise — funnels through here.
+  // Three paths, in order: (1) a saved Q&A match always wins — it's an
+  // exact answer someone wrote on purpose, so it can't be "the wrong
+  // answer" the way an inference could be. Matching is keyword-coverage
+  // based (matchSavedQa), robust to rewording — voice-transcribed questions
+  // rarely match a saved question's exact wording. (2) a near-duplicate of
+  // an earlier question is answered from cache, no network call at all.
+  // (3) otherwise, with AI on, ask Claude and cache the result; with AI
+  // off, there's nothing left that can answer it for free, so say so.
   const ask = useCallback(
     (question: string) => {
-      const savedMatch = qa.entries.find(
-        (e) => similarity(e.question, question) >= DUPLICATE_THRESHOLD,
-      );
+      const savedMatch = matchSavedQa(qa.entries, question);
       if (savedMatch) {
         pushQa({ question, answer: savedMatch.answer, pending: false, source: "saved" });
         return;
       }
 
-      const fileKey = files.map((f) => f.id).slice().sort().join(",");
-
       const cached = answerCacheRef.current.find(
-        (c) =>
-          c.fileKey === fileKey &&
-          similarity(c.question, question) >= DUPLICATE_THRESHOLD,
+        (c) => similarity(c.question, question) >= DUPLICATE_THRESHOLD,
       );
       if (cached) {
         pushQa({ question, answer: cached.answer, pending: false, source: "cache" });
@@ -117,22 +103,13 @@ export default function App() {
       }
 
       if (!aiEnabled) {
-        const id = pushQa({ question, answer: "", pending: true, source: "local" });
-        localSearch(question)
-          .then((result) => {
-            const answer = formatLocalSearchAnswer(result);
-            patchQa(id, { pending: false, answer });
-            answerCacheRef.current = [
-              { fileKey, question, answer },
-              ...answerCacheRef.current,
-            ].slice(0, 50);
-          })
-          .catch((err) => {
-            patchQa(id, {
-              pending: false,
-              error: err instanceof Error ? err.message : "Local search failed.",
-            });
-          });
+        pushQa({
+          question,
+          answer: "",
+          pending: false,
+          source: "none",
+          error: "No saved answer for this — turn AI on to ask Claude.",
+        });
         return;
       }
 
@@ -148,14 +125,14 @@ export default function App() {
         onDone: (answer) => {
           patchQa(id, { pending: false, answer });
           answerCacheRef.current = [
-            { fileKey, question, answer },
+            { question, answer },
             ...answerCacheRef.current,
           ].slice(0, 50);
         },
         onError: (message) => patchQa(id, { pending: false, error: message }),
       });
     },
-    [aiEnabled, files, qa.entries, pushQa, patchQa],
+    [aiEnabled, qa.entries, pushQa, patchQa],
   );
 
   // Each finished utterance either gets answered (it reads as a question)
@@ -173,21 +150,6 @@ export default function App() {
 
   const busy = record.some((e) => e.kind === "qa" && e.pending);
 
-  const [faqBusy, setFaqBusy] = useState(false);
-
-  // Downloads a free, locally-generated preview of sample questions/answers
-  // this app can read from the attached files — never calls Claude.
-  const handleExportFaq = useCallback(async () => {
-    setFaqBusy(true);
-    try {
-      downloadFaq(await fetchFaq());
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Couldn't generate sample Q&A.");
-    } finally {
-      setFaqBusy(false);
-    }
-  }, []);
-
   // Wipes the on-screen record (and the answer cache keyed to it) — nothing
   // server-side to undo, but it's the whole conversation so confirm first
   // rather than lose it to a stray click.
@@ -197,34 +159,6 @@ export default function App() {
     setRecord([]);
     answerCacheRef.current = [];
   }, [record.length]);
-
-  const [screenshotBusy, setScreenshotBusy] = useState(false);
-
-  // Capture the screen/window/tab the user picks, attach it, and ask about
-  // it right away — no separate "now type your question" step. Screenshots
-  // are images, so local keyword search can't read them (see
-  // local-search.service.js) — auto-asking with AI off would just report
-  // "no match," so just attach and say so instead.
-  const handleScreenshot = useCallback(async () => {
-    setScreenshotBusy(true);
-    try {
-      const file = await captureScreenshot();
-      const attached = await upload([file]);
-      if (attached) {
-        if (aiEnabled) ask("What does this screenshot show?");
-        else addNote(`Screenshot attached (${file.name}) — turn AI on to ask about it.`);
-      }
-    } catch (err) {
-      const cancelled =
-        err instanceof DOMException &&
-        (err.name === "NotAllowedError" || err.name === "AbortError");
-      if (!cancelled) {
-        alert(err instanceof Error ? err.message : "Screenshot failed.");
-      }
-    } finally {
-      setScreenshotBusy(false);
-    }
-  }, [upload, ask, aiEnabled, addNote]);
 
   return (
     <div className="term-app">
@@ -258,8 +192,9 @@ export default function App() {
           Voice Doc Assistant<span className="caret">&nbsp;</span>
         </h1>
         <p className="tagline">
-          Attach your files, start talking. Everything you say is recorded as
-          text — questions get answered, everything else just joins the log.
+          Start talking. Everything you say is recorded as text — questions
+          get answered from your saved Q&A or Claude, everything else just
+          joins the log.
         </p>
       </header>
 
@@ -277,27 +212,9 @@ export default function App() {
           onToggleAi={toggleAi}
           onDownload={() => downloadTranscript(record)}
           onClear={handleClear}
-          onExportFaq={handleExportFaq}
-          faqBusy={faqBusy}
-          onScreenshot={handleScreenshot}
-          screenshotSupported={screenshotSupported()}
-          screenshotBusy={screenshotBusy}
-          fileCount={files.length}
-          filesOpen={filesOpen}
-          onToggleFiles={() => setFilesOpen((v) => !v)}
-          onInsertClick={() => fileInputRef.current?.click()}
           qaCount={qa.entries.length}
           qaOpen={qaOpen}
           onToggleQa={() => setQaOpen((v) => !v)}
-        />
-        <FileListPanel
-          files={files}
-          open={filesOpen}
-          onInsertClick={() => fileInputRef.current?.click()}
-          onUpload={upload}
-          onRemove={remove}
-          onRemoveMany={removeMany}
-          onRename={rename}
         />
         <QaPanel
           entries={qa.entries}
@@ -308,17 +225,6 @@ export default function App() {
           onImport={qa.importMany}
         />
       </div>
-
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        hidden
-        onChange={(e) => {
-          void upload(e.target.files);
-          e.target.value = "";
-        }}
-      />
 
       {!supported && (
         <p className="unsupported">

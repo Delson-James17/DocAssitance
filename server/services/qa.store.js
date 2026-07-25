@@ -9,9 +9,9 @@ const TABLE = "qa_entries";
 
 /**
  * Repository for manually-curated Q&A pairs, backed by a Supabase Postgres
- * table with an in-memory cache — same shape as attachment.store.js, so a
- * saved answer survives server restarts when Supabase is configured, and
- * still works (for the current session) when it isn't.
+ * table with an in-memory cache, so a saved answer survives server restarts
+ * when Supabase is configured, and still works (for the current session)
+ * when it isn't.
  */
 export function createQaStore() {
   /** @type {Map<string, QaEntry>} */
@@ -60,9 +60,8 @@ export function createQaStore() {
         createdAt: new Date().toISOString(),
       };
       entries.set(entry.id, entry);
-      // Persist best-effort — same "keep it in memory for this session even
-      // if Supabase is unreachable" tradeoff as attachment.store.js, so a
-      // save never fails just because the database hiccuped.
+      // Persist best-effort: if Supabase is unreachable, keep the entry in
+      // memory for this session instead of failing the save outright.
       if (supabaseEnabled) {
         try {
           const { error } = await supabase.from(TABLE).insert({

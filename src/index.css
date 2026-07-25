@@ -338,13 +338,13 @@ header h1 .caret {
   color: var(--cyan);
   border-color: var(--cyan);
 }
-.src-tag.local {
-  color: var(--yellow);
-  border-color: var(--yellow);
-}
 .src-tag.saved {
   color: var(--green);
   border-color: var(--green);
+}
+.src-tag.ai {
+  color: var(--muted);
+  border-color: var(--border-bright);
 }
 
 /* ---------- Console panel ---------- */
@@ -594,10 +594,6 @@ header h1 .caret {
   width: 300px;
   border-left-width: 1px;
 }
-.filelist-panel.drag {
-  border-left-color: var(--green);
-  box-shadow: inset 0 0 0 1px var(--green);
-}
 .filelist-inner {
   width: 300px;
   height: 100%;
@@ -611,80 +607,6 @@ header h1 .caret {
   padding: 0;
 }
 
-.select-all-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.5rem 0.8rem;
-  border-bottom: 1px dashed var(--border);
-  flex-shrink: 0;
-}
-.check-row {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  font-size: 0.8rem;
-  color: var(--text);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.select-all-row {
-  flex-wrap: wrap;
-  row-gap: 0.4rem;
-}
-
-input[type="checkbox"] {
-  accent-color: var(--green);
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  cursor: pointer;
-}
-
-/* ---------- Attachment listing ---------- */
-.file-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-}
-.file-list li {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  padding: 0.4rem 0.8rem;
-  border-bottom: 1px dotted var(--border);
-  font-size: 0.85rem;
-}
-.file-list li:last-child {
-  border-bottom: none;
-}
-.file-list li:hover {
-  background: var(--panel-2);
-}
-.file-list li.busy {
-  opacity: 0.5;
-}
-.file-thumb {
-  width: 28px;
-  height: 28px;
-  object-fit: cover;
-  border: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.file-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.file-name::before {
-  content: "\2022 ";
-  color: var(--green);
-}
 .file-actions {
   display: flex;
   gap: 0.4rem;
@@ -723,13 +645,6 @@ input[type="checkbox"] {
   outline: none;
 }
 
-.kbd {
-  border: 1px solid var(--border-bright);
-  padding: 0.05rem 0.35rem;
-  color: var(--bright);
-  font-size: 0.82em;
-}
-
 /* ---------- Saved Q&A drawer ---------- */
 .qa-form {
   display: flex;
@@ -754,6 +669,23 @@ textarea.qa-answer-input {
 .qa-hint {
   margin: 0;
   font-size: 0.75rem;
+}
+
+.qa-search {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px dashed var(--border);
+  flex-shrink: 0;
+}
+.qa-search .edit-input {
+  flex: 1;
+  min-width: 0;
+}
+.qa-search-count {
+  font-size: 0.75rem;
+  white-space: nowrap;
 }
 
 .qa-list {

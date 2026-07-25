@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { normalizeQuestion } from "../lib/dedupe";
 import { parseQaImportFile } from "../lib/qaImport";
 import type { QaEntry } from "../types";
@@ -12,9 +12,8 @@ interface Props {
   onImport: (pairs: { question: string; answer: string }[]) => Promise<number>;
 }
 
-// Collapsible drawer for the manually-curated Q&A table: an add form up top,
-// the saved list (question + answer, editable in place) below. Mirrors
-// FileListPanel's shape so the two drawers feel like the same UI language.
+// Collapsible drawer for the manually-curated Q&A table: an add form up
+// top, the saved list (question + answer, editable in place) below.
 export function QaPanel({ entries, open, onAdd, onUpdate, onRemove, onImport }: Props) {
   const [newQuestion, setNewQuestion] = useState("");
   const [newAnswer, setNewAnswer] = useState("");
@@ -27,6 +26,22 @@ export function QaPanel({ entries, open, onAdd, onUpdate, onRemove, onImport }: 
 
   const importInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
+
+  const [search, setSearch] = useState("");
+  // Keyword filter over the question text only — every typed word must
+  // appear somewhere in the question (in any order, not as one contiguous
+  // phrase). A whole-phrase substring match missed entries whenever the
+  // words in the search weren't adjacent in that exact order (e.g.
+  // "inheritance polymorphism" wouldn't match "difference between
+  // Inheritance and Polymorphism"); this checks each word independently.
+  const filtered = useMemo(() => {
+    const terms = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return entries;
+    return entries.filter((e) => {
+      const q = e.question.toLowerCase();
+      return terms.every((term) => q.includes(term));
+    });
+  }, [entries, search]);
 
   async function handleAdd() {
     const question = newQuestion.trim();
@@ -137,6 +152,27 @@ export function QaPanel({ entries, open, onAdd, onUpdate, onRemove, onImport }: 
           />
         </div>
 
+        {entries.length > 0 && (
+          <div className="qa-search">
+            <input
+              className="edit-input"
+              placeholder="Search saved Q&A…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {search && (
+              <button className="icon-btn" title="Clear search" onClick={() => setSearch("")}>
+                [x]
+              </button>
+            )}
+            {search && (
+              <span className="muted qa-search-count">
+                {filtered.length} of {entries.length}
+              </span>
+            )}
+          </div>
+        )}
+
         <div className="qa-form">
           <input
             className="edit-input"
@@ -173,9 +209,13 @@ export function QaPanel({ entries, open, onAdd, onUpdate, onRemove, onImport }: 
             </p>
           )}
 
-          {entries.length > 0 && (
+          {entries.length > 0 && filtered.length === 0 && (
+            <p className="muted">No matches for "{search}".</p>
+          )}
+
+          {filtered.length > 0 && (
             <ul className="qa-list">
-              {entries.map((entry) => (
+              {filtered.map((entry) => (
                 <li key={entry.id} className={`qa-item${busyId === entry.id ? " busy" : ""}`}>
                   {editingId === entry.id ? (
                     <div className="qa-form">

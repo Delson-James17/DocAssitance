@@ -3,27 +3,29 @@ import type { RecordEntry } from "../types";
 
 type QaSource = Extract<RecordEntry, { kind: "qa" }>["source"];
 
-// Labels where an answer came from — "claude" is the normal (token-costing)
-// path and gets no badge; the other two are free, so they're called out.
+// Labels where an answer came from. "AI" is the only path that spends
+// tokens — the other paths are free, which is also why they get the
+// brighter, accent-colored badges while AI gets a plain, muted one. "none"
+// (AI off, nothing saved matched) gets no badge — the error text says it all.
 function SourceTag({ source }: { source: QaSource }) {
   if (source === "cache") {
     return (
       <span className="src-tag cache" title="Reused from an earlier answer to this same question — no tokens spent">
-        cached
-      </span>
-    );
-  }
-  if (source === "local") {
-    return (
-      <span className="src-tag local" title="Local keyword search over attached text files — AI is off, no tokens spent">
-        local
+        Cached
       </span>
     );
   }
   if (source === "saved") {
     return (
-      <span className="src-tag saved" title="Matched a manually-curated Q&A entry — no tokens spent, no document search involved">
-        saved
+      <span className="src-tag saved" title="Matched a manually-curated Q&A entry — no tokens spent">
+        Saved
+      </span>
+    );
+  }
+  if (source === "claude") {
+    return (
+      <span className="src-tag ai" title="Answered by Claude — uses tokens">
+        AI
       </span>
     );
   }
@@ -43,15 +45,6 @@ interface Props {
   onToggleAi: () => void;
   onDownload: () => void;
   onClear: () => void;
-  onExportFaq: () => void;
-  faqBusy: boolean;
-  onScreenshot: () => void;
-  screenshotSupported: boolean;
-  screenshotBusy: boolean;
-  fileCount: number;
-  filesOpen: boolean;
-  onToggleFiles: () => void;
-  onInsertClick: () => void;
   qaCount: number;
   qaOpen: boolean;
   onToggleQa: () => void;
@@ -70,15 +63,6 @@ export function Console({
   onToggleAi,
   onDownload,
   onClear,
-  onExportFaq,
-  faqBusy,
-  onScreenshot,
-  screenshotSupported,
-  screenshotBusy,
-  fileCount,
-  filesOpen,
-  onToggleFiles,
-  onInsertClick,
   qaCount,
   qaOpen,
   onToggleQa,
@@ -111,7 +95,7 @@ export function Console({
             title={
               aiEnabled
                 ? "AI is on — questions are sent to Claude and cost tokens. Click to turn off."
-                : "AI is off — questions are only logged, nothing is sent to Claude (zero cost). Click to turn on."
+                : "AI is off — only saved Q&A can answer, nothing is sent to Claude (zero cost). Click to turn on."
             }
             onClick={onToggleAi}
           >
@@ -132,14 +116,6 @@ export function Console({
             disabled={record.length === 0}
           >
             ✕ Clear
-          </button>
-          <button
-            className="term-btn"
-            title="Preview sample questions & answers this app can read from your attached files — generated locally, no AI used"
-            onClick={onExportFaq}
-            disabled={faqBusy}
-          >
-            {faqBusy ? "⭳ Sample Q&A…" : "⭳ Sample Q&A"}
           </button>
           <span className={`status ${status}`}>{status}</span>
         </div>
@@ -221,7 +197,7 @@ export function Console({
           className="cmd-input"
           placeholder={
             !aiEnabled
-              ? "AI is off — questions will only be logged…"
+              ? "AI is off — only saved Q&A can answer…"
               : supported
                 ? "Type a question and press Enter…"
                 : "Type a question…"
@@ -234,37 +210,8 @@ export function Console({
         />
 
         <button
-          className="square-btn"
-          title="Insert attachment"
-          onClick={onInsertClick}
-        >
-          [+]
-        </button>
-
-        <button
-          className="square-btn"
-          title={
-            screenshotSupported
-              ? "Screenshot the page and ask about it"
-              : "Screenshot capture isn't supported in this browser"
-          }
-          onClick={onScreenshot}
-          disabled={!screenshotSupported || screenshotBusy}
-        >
-          {screenshotBusy ? "[…]" : "[📷]"}
-        </button>
-
-        <button
-          className={`square-btn${filesOpen ? " active" : ""}`}
-          title="File list"
-          onClick={onToggleFiles}
-        >
-          [≡{fileCount > 0 ? ` ${fileCount}` : ""}]
-        </button>
-
-        <button
           className={`square-btn${qaOpen ? " active" : ""}`}
-          title="Saved Q&A — manually-curated answers, checked before document search"
+          title="Saved Q&A — manually-curated answers, checked before Claude"
           onClick={onToggleQa}
         >
           [?{qaCount > 0 ? ` ${qaCount}` : ""}]

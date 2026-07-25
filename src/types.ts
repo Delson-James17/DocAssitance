@@ -1,9 +1,3 @@
-export interface Attachment {
-  id: string;
-  name: string;
-  mimetype: string;
-}
-
 // A manually-curated Q&A pair, persisted server-side (Supabase if
 // configured, in-memory otherwise) — see server/services/qa.store.js.
 export interface QaEntry {
@@ -31,10 +25,9 @@ export type RecordEntry =
       pending: boolean;
       error?: string;
       timestamp: number;
-      // Where the answer came from: Claude, a reused answer to the same
-      // earlier question (no tokens spent), a local keyword search over
-      // attached text files (also no tokens spent, used while AI is off),
-      // or a manually-curated Q&A entry (no tokens spent, and no risk of an
-      // unrelated document passage being surfaced instead).
-      source: "claude" | "cache" | "local" | "saved";
+      // Where the answer came from: Claude, a reused answer to an earlier
+      // question (no tokens spent), a manually-curated Q&A entry (no
+      // tokens spent, and no risk of Claude answering the wrong thing), or
+      // "none" — AI is off and nothing saved could answer it either.
+      source: "claude" | "cache" | "saved" | "none";
     };
