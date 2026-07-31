@@ -18,6 +18,25 @@ function json(data, init) {
   });
 }
 
+// See server/http/qa.controller.js's cleanAlternates for the same logic —
+// kept as a duplicate here rather than a shared import since the two
+// controllers already don't share HTTP-layer code (see that file's header
+// comment), only the underlying store.
+function cleanAlternates(raw, question) {
+  const list = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split("\n") : [];
+  const seen = new Set([question.toLowerCase()]);
+  const cleaned = [];
+  for (const item of list) {
+    const text = (item ?? "").toString().trim();
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cleaned.push(text);
+  }
+  return cleaned;
+}
+
 export default async (req) => {
   const store = createQaStore();
   const segments = new URL(req.url).pathname.split("/").filter(Boolean);
@@ -35,7 +54,8 @@ export default async (req) => {
       if (!question || !answer) {
         return json({ error: "Both a question and an answer are required." }, { status: 400 });
       }
-      await store.add({ question, answer });
+      const alternates = cleanAlternates(body?.alternates, question);
+      await store.add({ question, answer, alternates });
       return json({ entries: await store.list() });
     }
 
@@ -43,10 +63,11 @@ export default async (req) => {
       const body = await req.json().catch(() => ({}));
       const raw = Array.isArray(body?.entries) ? body.entries : [];
       const pairs = raw
-        .map((e) => ({
-          question: (e?.question ?? "").toString().trim(),
-          answer: (e?.answer ?? "").toString().trim(),
-        }))
+        .map((e) => {
+          const question = (e?.question ?? "").toString().trim();
+          const answer = (e?.answer ?? "").toString().trim();
+          return { question, answer, alternates: cleanAlternates(e?.alternates, question) };
+        })
         .filter((e) => e.question && e.answer);
       if (pairs.length === 0) {
         return json({ error: "No valid question/answer pairs found to import." }, { status: 400 });
@@ -62,6 +83,9 @@ export default async (req) => {
       if (body?.answer !== undefined) fields.answer = body.answer.toString().trim();
       if (fields.question === "" || fields.answer === "") {
         return json({ error: "Question and answer can't be empty." }, { status: 400 });
+      }
+      if (body?.alternates !== undefined) {
+        fields.alternates = cleanAlternates(body.alternates, fields.question ?? "");
       }
       const entry = await store.update(rest[0], fields);
       if (!entry) return json({ error: "Entry not found." }, { status: 404 });

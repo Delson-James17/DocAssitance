@@ -4,7 +4,7 @@ import { supabase, supabaseEnabled } from "./supabase.client.js";
 const TABLE = "qa_entries";
 
 /**
- * @typedef {{ id: string, question: string, answer: string, createdAt: string }} QaEntry
+ * @typedef {{ id: string, question: string, alternates: string[], answer: string, createdAt: string }} QaEntry
  */
 
 /**
@@ -22,13 +22,14 @@ export function createQaStore() {
     try {
       const { data, error } = await supabase
         .from(TABLE)
-        .select("id, question, answer, created_at")
+        .select("id, question, alternates, answer, created_at")
         .order("created_at", { ascending: true });
       if (error) throw error;
       for (const row of data ?? []) {
         entries.set(row.id, {
           id: row.id,
           question: row.question,
+          alternates: row.alternates ?? [],
           answer: row.answer,
           createdAt: row.created_at,
         });
@@ -51,11 +52,12 @@ export function createQaStore() {
       return sorted();
     },
 
-    async add({ question, answer }) {
+    async add({ question, answer, alternates = [] }) {
       await ready;
       const entry = {
         id: crypto.randomUUID(),
         question,
+        alternates,
         answer,
         createdAt: new Date().toISOString(),
       };
@@ -67,6 +69,7 @@ export function createQaStore() {
           const { error } = await supabase.from(TABLE).insert({
             id: entry.id,
             question: entry.question,
+            alternates: entry.alternates,
             answer: entry.answer,
             created_at: entry.createdAt,
           });
@@ -83,14 +86,15 @@ export function createQaStore() {
      * batched Supabase insert instead of one per row, same best-effort
      * fallback as `add` if Supabase is unreachable.
      *
-     * @param {{ question: string, answer: string }[]} pairs
+     * @param {{ question: string, answer: string, alternates?: string[] }[]} pairs
      */
     async addMany(pairs) {
       await ready;
       const createdAt = new Date().toISOString();
-      const newEntries = pairs.map(({ question, answer }) => ({
+      const newEntries = pairs.map(({ question, answer, alternates = [] }) => ({
         id: crypto.randomUUID(),
         question,
+        alternates,
         answer,
         createdAt,
       }));
@@ -102,6 +106,7 @@ export function createQaStore() {
             newEntries.map((e) => ({
               id: e.id,
               question: e.question,
+              alternates: e.alternates,
               answer: e.answer,
               created_at: e.createdAt,
             })),

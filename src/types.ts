@@ -3,6 +3,12 @@
 export interface QaEntry {
   id: string;
   question: string;
+  // Other ways of asking the same question ("Walk me through your resume",
+  // "Can you introduce yourself?" for a "Tell me about yourself?" entry).
+  // Matching (src/lib/qaMatch.ts) checks all of these, not just `question`
+  // — two phrasings can mean the same thing while sharing almost no actual
+  // words, which keyword matching alone can never bridge on its own.
+  alternates: string[];
   answer: string;
   createdAt: string;
 }

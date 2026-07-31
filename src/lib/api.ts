@@ -17,19 +17,23 @@ export async function listQa(): Promise<QaEntry[]> {
   return unwrapQa(await fetch("/api/qa"));
 }
 
-export async function addQa(question: string, answer: string): Promise<QaEntry[]> {
+export async function addQa(
+  question: string,
+  answer: string,
+  alternates: string[] = [],
+): Promise<QaEntry[]> {
   return unwrapQa(
     await fetch("/api/qa", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, answer }),
+      body: JSON.stringify({ question, answer, alternates }),
     }),
   );
 }
 
 export async function updateQa(
   id: string,
-  fields: { question?: string; answer?: string },
+  fields: { question?: string; answer?: string; alternates?: string[] },
 ): Promise<QaEntry[]> {
   return unwrapQa(
     await fetch(`/api/qa/${encodeURIComponent(id)}`, {
@@ -52,7 +56,7 @@ export interface ImportQaResult {
 // Bulk-adds many question/answer pairs in one request (see qaImport.ts for
 // the .csv/.json parsing that produces these pairs).
 export async function importQa(
-  pairs: { question: string; answer: string }[],
+  pairs: { question: string; answer: string; alternates?: string[] }[],
 ): Promise<ImportQaResult> {
   const res = await fetch("/api/qa/import", {
     method: "POST",
@@ -74,15 +78,25 @@ export interface AskHandlers {
   onError: (message: string) => void;
 }
 
-// Ask a question and consume the Server-Sent Events stream from the backend.
+export interface AskContextEntry {
+  question: string;
+  answer: string;
+}
+
+// Ask a question and consume the Server-Sent Events stream from the
+// backend. `context` is an optional handful of loosely-related saved Q&A
+// pairs (see qaMatch.ts's findRelatedContext) — background Claude can draw
+// on to keep its answer consistent with real saved facts, when there's
+// nothing that directly answers the question but something still relevant.
 export async function askQuestion(
   question: string,
   handlers: AskHandlers,
+  context: AskContextEntry[] = [],
 ): Promise<void> {
   const res = await fetch("/api/ask", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, context }),
   });
 
   if (!res.ok || !res.body) {

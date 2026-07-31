@@ -21,6 +21,25 @@ function logUsage(usage) {
 }
 
 /**
+ * Trusts nothing from the request body beyond "is it shaped like a list of
+ * {question, answer} strings" — this is user-supplied saved data forwarded
+ * straight into the Claude prompt, not something the server generated
+ * itself.
+ *
+ * @param {unknown} raw
+ */
+function cleanContext(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((c) => ({
+      question: (c?.question ?? "").toString().trim(),
+      answer: (c?.answer ?? "").toString().trim(),
+    }))
+    .filter((c) => c.question && c.answer)
+    .slice(0, 5);
+}
+
+/**
  * HTTP handler that answers a question from Claude's general knowledge and
  * streams the answer back as Server-Sent Events.
  *
@@ -32,10 +51,11 @@ export function createAskController({ claude }) {
     if (!question) {
       return res.status(400).json({ error: "No question provided." });
     }
+    const context = cleanContext(req.body?.context);
 
     const sse = initSse(res);
     try {
-      const stream = claude.streamAnswer({ question });
+      const stream = claude.streamAnswer({ question, context });
       stream.on("text", (delta) => sse.send("delta", { text: delta }));
 
       const final = await stream.finalMessage();

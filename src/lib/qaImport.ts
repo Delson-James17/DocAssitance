@@ -6,6 +6,17 @@
 export interface ParsedQaRow {
   question: string;
   answer: string;
+  alternates?: string[];
+}
+
+// "|" rather than "," since answers/alternates can (and often do) contain
+// commas themselves — using comma here would silently mis-split them.
+function parseAlternatesCell(cell: string | undefined): string[] {
+  if (!cell) return [];
+  return cell
+    .split("|")
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 // Minimal RFC4180-style CSV parser: handles quoted fields, escaped quotes
@@ -63,10 +74,13 @@ function parseCsv(text: string): ParsedQaRow[] {
   if (qIdx === -1 || aIdx === -1) {
     throw new Error('CSV needs a header row with "question" and "answer" columns.');
   }
+  // Optional — older exports/templates without this column still work fine.
+  const altIdx = header.findIndex((h) => h === "alternates");
 
   return rows.slice(1).map((r) => ({
     question: (r[qIdx] ?? "").trim(),
     answer: (r[aIdx] ?? "").trim(),
+    alternates: altIdx === -1 ? [] : parseAlternatesCell(r[altIdx]),
   }));
 }
 
@@ -86,7 +100,11 @@ function parseJson(text: string): ParsedQaRow[] {
       const row = item as Record<string, unknown>;
       const question = String(row.question ?? row.q ?? "").trim();
       const answer = String(row.answer ?? row.a ?? "").trim();
-      return { question, answer };
+      const altRaw = row.alternates;
+      const alternates = Array.isArray(altRaw)
+        ? altRaw.map((a) => String(a).trim()).filter(Boolean)
+        : [];
+      return { question, answer, alternates };
     });
   }
 

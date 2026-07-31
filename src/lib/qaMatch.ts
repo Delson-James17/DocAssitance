@@ -14,6 +14,15 @@
 // ___?"): "What is AWS?" and "What is OOP?" already agree on 2 of maybe 3
 // words before the real subject is even considered, which is enough
 // overlap to falsely "match" two completely unrelated questions.
+//
+// Keyword overlap alone still can't bridge two phrasings that mean the same
+// thing but share almost no words at all ("Tell me about yourself?" vs.
+// "Walk me through your resume.") — no amount of stopword-stripping or
+// weighting fixes that, since there's no shared vocabulary to weigh in the
+// first place. That's what QaEntry.alternates is for: each entry is scored
+// against its question *and* every alternate phrasing, and whichever
+// variant scores best wins — so once you've told the app these phrasings
+// are the same question, any of them matches.
 
 import { similarity } from "./dedupe";
 import type { QaEntry } from "../types";
@@ -47,23 +56,31 @@ function extractKeywords(question: string): string[] {
   return Array.from(new Set(words));
 }
 
+/** Every phrasing this entry can be matched against — the question itself, plus its saved alternates. */
+function variantsOf(entry: QaEntry): string[] {
+  return [entry.question, ...(entry.alternates ?? [])];
+}
+
 function computeIdfWeights(entries: QaEntry[], keywords: string[]): Record<string, number> {
   const total = Math.max(entries.length, 1);
   const weights: Record<string, number> = {};
   for (const kw of keywords) {
     const re = new RegExp(`\\b${escapeRegExp(kw)}`, "i");
-    const df = entries.reduce((n, e) => n + (re.test(e.question) ? 1 : 0), 0);
+    const df = entries.reduce(
+      (n, e) => n + (variantsOf(e).some((v) => re.test(v)) ? 1 : 0),
+      0,
+    );
     weights[kw] = Math.log((total + 1) / (df + 1)) + 1;
   }
   return weights;
 }
 
-function scoreEntry(
-  entry: QaEntry,
+function scoreText(
+  text: string,
   keywords: string[],
   weights: Record<string, number>,
 ): { coverage: number; weighted: number } {
-  const lower = entry.question.toLowerCase();
+  const lower = text.toLowerCase();
   let coverage = 0;
   let weighted = 0;
   for (const kw of keywords) {
@@ -75,6 +92,22 @@ function scoreEntry(
     }
   }
   return { coverage, weighted };
+}
+
+/** An entry's score is its *best-matching* variant — question or any alternate. */
+function scoreEntry(
+  entry: QaEntry,
+  keywords: string[],
+  weights: Record<string, number>,
+): { coverage: number; weighted: number } {
+  let best = { coverage: 0, weighted: 0 };
+  for (const variant of variantsOf(entry)) {
+    const s = scoreText(variant, keywords, weights);
+    if (s.coverage > best.coverage || (s.coverage === best.coverage && s.weighted > best.weighted)) {
+      best = s;
+    }
+  }
+  return best;
 }
 
 // A saved entry needs to cover most of the question's keywords, not just
@@ -109,10 +142,10 @@ export function matchSavedQa(entries: QaEntry[], question: string): QaEntry | nu
   // share their one real keyword ("yourself") while being totally
   // different questions, once the words that actually distinguish them
   // ("tell me about" vs. "where do you see ... in 5 years") were stripped
-  // as filler and never compared. Only *among candidates already past the
-  // coverage bar above* — never as a way for a zero-coverage candidate to
-  // qualify — break the tie with whole-sentence similarity, which does
-  // weigh those filler words back in.
+  // as filler. Only *among candidates already past the coverage bar
+  // above* — never as a way for a zero-coverage candidate to qualify —
+  // break the tie with whole-sentence similarity, which does weigh those
+  // filler words back in.
   const top = scored[0];
   const tied = scored.filter((s) => s.coverage === top.coverage && s.weighted === top.weighted);
   if (tied.length === 1) return tied[0].entry;
@@ -121,4 +154,46 @@ export function matchSavedQa(entries: QaEntry[], question: string): QaEntry | nu
     (a, b) => similarity(b.entry.question, question) - similarity(a.entry.question, question),
   );
   return tied[0].entry;
+}
+
+// How many loosely-related saved entries to hand Claude as background —
+// enough to ground an improvised answer in real facts, small enough that a
+// pure general-knowledge question (which won't match anything personal at
+// all) costs nothing extra.
+const MAX_RELATED_CONTEXT = 2;
+// Keeps each included answer from ballooning the request — this is meant to
+// be "here are the relevant facts", not a full essay reproduced verbatim.
+const MAX_CONTEXT_ANSWER_CHARS = 400;
+
+export interface RelatedContext {
+  question: string;
+  answer: string;
+}
+
+// Finds saved entries loosely related to a question that *didn't* qualify
+// as a direct match (matchSavedQa already owns that, stricter, higher up
+// the pipeline) — used to ground Claude's fallback answer in real saved
+// facts about the user instead of pure improvisation. Any nonzero keyword
+// overlap counts here (no coverage-ratio gate like matchSavedQa): the goal
+// isn't "is this the same question", just "is this worth mentioning as
+// background", so even a single shared keyword ("project" in "What's your
+// current project?" matching a saved "projects" answer) is useful signal.
+export function findRelatedContext(entries: QaEntry[], question: string): RelatedContext[] {
+  if (entries.length === 0) return [];
+  const keywords = extractKeywords(question);
+  if (keywords.length === 0) return [];
+
+  const weights = computeIdfWeights(entries, keywords);
+  return entries
+    .map((entry) => ({ entry, ...scoreEntry(entry, keywords, weights) }))
+    .filter((s) => s.coverage > 0)
+    .sort((a, b) => b.coverage - a.coverage || b.weighted - a.weighted)
+    .slice(0, MAX_RELATED_CONTEXT)
+    .map((s) => ({
+      question: s.entry.question,
+      answer:
+        s.entry.answer.length > MAX_CONTEXT_ANSWER_CHARS
+          ? `${s.entry.answer.slice(0, MAX_CONTEXT_ANSWER_CHARS)}…`
+          : s.entry.answer,
+    }));
 }

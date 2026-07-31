@@ -6,7 +6,7 @@ import { useSpeechRecognition } from "./hooks/useSpeechRecognition";
 import { useTheme } from "./hooks/useTheme";
 import { askQuestion } from "./lib/api";
 import { DUPLICATE_THRESHOLD, similarity } from "./lib/dedupe";
-import { matchSavedQa } from "./lib/qaMatch";
+import { findRelatedContext, matchSavedQa } from "./lib/qaMatch";
 import { downloadQaTranscript, downloadTranscript } from "./lib/transcript";
 import type { RecordEntry } from "./types";
 
@@ -114,22 +114,33 @@ export default function App() {
 
       const id = pushQa({ question, answer: "", pending: true, source: "claude" });
 
-      void askQuestion(question, {
-        onDelta: (text) =>
-          setRecord((prev) =>
-            prev.map((e) =>
-              e.id === id && e.kind === "qa" ? { ...e, answer: e.answer + text } : e,
+      // Loosely-related saved entries (not a match, just topically nearby)
+      // ride along as background so Claude's improvised answer stays
+      // consistent with real facts the user already wrote about themselves,
+      // instead of inventing an unrelated persona. Unrelated questions
+      // naturally find none, so cost is unaffected for those.
+      const context = findRelatedContext(qa.entries, question);
+
+      void askQuestion(
+        question,
+        {
+          onDelta: (text) =>
+            setRecord((prev) =>
+              prev.map((e) =>
+                e.id === id && e.kind === "qa" ? { ...e, answer: e.answer + text } : e,
+              ),
             ),
-          ),
-        onDone: (answer) => {
-          patchQa(id, { pending: false, answer });
-          answerCacheRef.current = [
-            { question, answer },
-            ...answerCacheRef.current,
-          ].slice(0, 50);
+          onDone: (answer) => {
+            patchQa(id, { pending: false, answer });
+            answerCacheRef.current = [
+              { question, answer },
+              ...answerCacheRef.current,
+            ].slice(0, 50);
+          },
+          onError: (message) => patchQa(id, { pending: false, error: message }),
         },
-        onError: (message) => patchQa(id, { pending: false, error: message }),
-      });
+        context,
+      );
     },
     [aiEnabled, qa.entries, pushQa, patchQa],
   );

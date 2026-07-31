@@ -3,13 +3,31 @@ import { normalizeQuestion } from "../lib/dedupe";
 import { parseQaImportFile } from "../lib/qaImport";
 import type { QaEntry } from "../types";
 
+// Textarea (one phrasing per line) <-> string[] — used for both the add
+// form and per-item editing.
+function parseAlternates(text: string): string[] {
+  return Array.from(
+    new Set(
+      text
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
 interface Props {
   entries: QaEntry[];
   open: boolean;
-  onAdd: (question: string, answer: string) => Promise<void>;
-  onUpdate: (id: string, fields: { question?: string; answer?: string }) => Promise<void>;
+  onAdd: (question: string, answer: string, alternates?: string[]) => Promise<void>;
+  onUpdate: (
+    id: string,
+    fields: { question?: string; answer?: string; alternates?: string[] },
+  ) => Promise<void>;
   onRemove: (id: string) => Promise<void>;
-  onImport: (pairs: { question: string; answer: string }[]) => Promise<number>;
+  onImport: (
+    pairs: { question: string; answer: string; alternates?: string[] }[],
+  ) => Promise<number>;
 }
 
 // Collapsible drawer for the manually-curated Q&A table: an add form up
@@ -17,29 +35,31 @@ interface Props {
 export function QaPanel({ entries, open, onAdd, onUpdate, onRemove, onImport }: Props) {
   const [newQuestion, setNewQuestion] = useState("");
   const [newAnswer, setNewAnswer] = useState("");
+  const [newAlternates, setNewAlternates] = useState("");
   const [saving, setSaving] = useState(false);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editQuestion, setEditQuestion] = useState("");
   const [editAnswer, setEditAnswer] = useState("");
+  const [editAlternates, setEditAlternates] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const importInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
 
   const [search, setSearch] = useState("");
-  // Keyword filter over the question text only — every typed word must
-  // appear somewhere in the question (in any order, not as one contiguous
-  // phrase). A whole-phrase substring match missed entries whenever the
-  // words in the search weren't adjacent in that exact order (e.g.
+  // Keyword filter over the question text *and* its alternate phrasings —
+  // every typed word must appear somewhere in one of them (in any order,
+  // not as one contiguous phrase). A whole-phrase substring match missed
+  // entries whenever the words weren't adjacent in that exact order (e.g.
   // "inheritance polymorphism" wouldn't match "difference between
   // Inheritance and Polymorphism"); this checks each word independently.
   const filtered = useMemo(() => {
     const terms = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
     if (terms.length === 0) return entries;
     return entries.filter((e) => {
-      const q = e.question.toLowerCase();
-      return terms.every((term) => q.includes(term));
+      const haystack = [e.question, ...e.alternates].join(" ").toLowerCase();
+      return terms.every((term) => haystack.includes(term));
     });
   }, [entries, search]);
 
@@ -48,22 +68,25 @@ export function QaPanel({ entries, open, onAdd, onUpdate, onRemove, onImport }: 
     const answer = newAnswer.trim();
     if (!question || !answer) return;
     setSaving(true);
-    await onAdd(question, answer);
+    await onAdd(question, answer, parseAlternates(newAlternates));
     setSaving(false);
     setNewQuestion("");
     setNewAnswer("");
+    setNewAlternates("");
   }
 
   function startEdit(entry: QaEntry) {
     setEditingId(entry.id);
     setEditQuestion(entry.question);
     setEditAnswer(entry.answer);
+    setEditAlternates(entry.alternates.join("\n"));
   }
 
   function cancelEdit() {
     setEditingId(null);
     setEditQuestion("");
     setEditAnswer("");
+    setEditAlternates("");
   }
 
   async function commitEdit(id: string) {
@@ -71,7 +94,7 @@ export function QaPanel({ entries, open, onAdd, onUpdate, onRemove, onImport }: 
     const answer = editAnswer.trim();
     if (!question || !answer) return cancelEdit();
     setBusyId(id);
-    await onUpdate(id, { question, answer });
+    await onUpdate(id, { question, answer, alternates: parseAlternates(editAlternates) });
     setBusyId(null);
     cancelEdit();
   }
@@ -91,7 +114,7 @@ export function QaPanel({ entries, open, onAdd, onUpdate, onRemove, onImport }: 
     try {
       const rows = await parseQaImportFile(file);
       const seen = new Set(entries.map((e) => normalizeQuestion(e.question)));
-      const fresh: { question: string; answer: string }[] = [];
+      const fresh: { question: string; answer: string; alternates?: string[] }[] = [];
       let skippedEmpty = 0;
       let skippedDuplicate = 0;
 
@@ -187,6 +210,13 @@ export function QaPanel({ entries, open, onAdd, onUpdate, onRemove, onImport }: 
             value={newAnswer}
             onChange={(e) => setNewAnswer(e.target.value)}
           />
+          <textarea
+            className="edit-input qa-answer-input"
+            placeholder="Other ways to ask this (one per line) — e.g. &quot;Walk me through your resume.&quot;"
+            rows={2}
+            value={newAlternates}
+            onChange={(e) => setNewAlternates(e.target.value)}
+          />
           <button
             className="term-btn"
             onClick={() => void handleAdd()}
@@ -194,11 +224,6 @@ export function QaPanel({ entries, open, onAdd, onUpdate, onRemove, onImport }: 
           >
             {saving ? "Saving…" : "+ Save Q&A"}
           </button>
-          <p className="muted qa-hint">
-            Or <strong>⭱ Import</strong> a .csv (header row: question, answer)
-            or a .json file — an array of {"{question, answer}"}, or an
-            object mapping questions to answers.
-          </p>
         </div>
 
         <div className="term-listing filelist-listing">
@@ -231,6 +256,14 @@ export function QaPanel({ entries, open, onAdd, onUpdate, onRemove, onImport }: 
                         rows={3}
                         value={editAnswer}
                         onChange={(e) => setEditAnswer(e.target.value)}
+                        onKeyDown={(e) => e.key === "Escape" && cancelEdit()}
+                      />
+                      <textarea
+                        className="edit-input qa-answer-input"
+                        placeholder="Other ways to ask this (one per line)"
+                        rows={2}
+                        value={editAlternates}
+                        onChange={(e) => setEditAlternates(e.target.value)}
                         onKeyDown={(e) => e.key === "Escape" && cancelEdit()}
                       />
                       <span className="file-actions">
@@ -266,6 +299,11 @@ export function QaPanel({ entries, open, onAdd, onUpdate, onRemove, onImport }: 
                         </span>
                       </div>
                       <p className="qa-answer">{entry.answer}</p>
+                      {entry.alternates.length > 0 && (
+                        <p className="qa-alternates muted">
+                          Also matches: {entry.alternates.join(" · ")}
+                        </p>
+                      )}
                     </>
                   )}
                 </li>

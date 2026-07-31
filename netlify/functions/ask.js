@@ -29,10 +29,25 @@ function jsonError(message, status) {
   });
 }
 
+// See server/http/ask.controller.js's cleanContext for the same logic —
+// duplicated rather than shared since the two backends don't share HTTP
+// glue, only the underlying claude.service.js call.
+function cleanContext(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((c) => ({
+      question: (c?.question ?? "").toString().trim(),
+      answer: (c?.answer ?? "").toString().trim(),
+    }))
+    .filter((c) => c.question && c.answer)
+    .slice(0, 5);
+}
+
 export default async (req) => {
   const body = await req.json().catch(() => ({}));
   const question = (body?.question ?? "").toString().trim();
   if (!question) return jsonError("No question provided.", 400);
+  const context = cleanContext(body?.context);
 
   const send = (controller, event, data) => {
     controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));

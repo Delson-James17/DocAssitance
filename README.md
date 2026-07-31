@@ -30,6 +30,7 @@ Ask mode (❓) or a typed question ───────────────
                       │ no
                       ▼
                     3. AI on?  ──yes──► Claude (claude-sonnet-5), streamed
+                      │           (grounded in loosely-related saved Q&A, if any)
                       │ no
                       ▼
                     Nothing free could answer it — say so
@@ -39,9 +40,9 @@ Ask mode (❓) or a typed question ───────────────
 - **Plain listening (▶) never guesses.** Everything heard is transcribed as-is, including misheard/garbled fragments — there's no "does this sound like a question" heuristic trying (and sometimes failing) to decide what to answer. **Ask mode (❓)** is the explicit, reliable way to get a spoken question answered — see [Using it](#using-it) below.
 - **Language**: questions can be asked in English, Filipino/Tagalog, or a Taglish mix — Claude understands either and answers in English by default (see [`server/prompts.js`](server/prompts.js)).
 - The backend holds your API key so it's never exposed to the browser.
-- **Saved Q&A** (**`[?]`** in the command bar) lets you type your own question/answer pairs and save them — a close match always wins over Claude, so you get a guaranteed-correct, zero-cost answer for anything you've curated, with no risk of Claude answering the wrong thing. Persisted in Supabase (a Postgres table) so it survives server restarts.
+- **Saved Q&A** (**`[?]`** in the command bar) lets you type your own question/answer pairs and save them — a close match always wins over Claude, so you get a guaranteed-correct, zero-cost answer for anything you've curated, with no risk of Claude answering the wrong thing. Persisted in Supabase (a Postgres table) so it survives server restarts. Each entry can also list **alternates** — other ways the same question tends to get asked (e.g. "Walk me through your resume" for "Tell me about yourself?") — so differently-worded but same-meaning questions all match the one saved answer instead of only the exact wording you first typed.
 - **Bulk-import Q&A** from a `.csv` or `.json` file — see [Using it](#using-it) below.
-- If AI is on and nothing saved matches, Claude answers from its own general knowledge (see [`server/prompts.js`](server/prompts.js)).
+- If AI is on and nothing saved matches exactly, Claude answers from its own general knowledge (see [`server/prompts.js`](server/prompts.js)) — but if the question is loosely related to something you've saved (say, a project or a strength that's connected to the question but not an exact match), Claude is quietly given that saved Q&A as background so its composed answer stays consistent with what you've actually written about yourself, instead of inventing an unrelated persona. Unrelated general-knowledge questions (e.g. "What is AWS?") don't trigger this at all — no saved data is ever sent unless it's actually related to the question.
 - The **Conversation** tab is a full transcript of everything said, questions included; **Q&A only** additionally shows the generated answer for each — the answer itself is the only thing exclusive to Q&A only. Each has its own **downloadable `.txt` file**.
 - The UI is styled like a **command-prompt window**.
 
@@ -121,6 +122,13 @@ server restarts and can be managed from the UI.
    the service-role key bypasses RLS entirely.
 3. If Supabase isn't configured at all, the app still runs — saved Q&A just
    lives in memory for that server session.
+4. **Already have a `qa_entries` table from before `alternates` existed?**
+   Re-running [`supabase/setup.sql`](supabase/setup.sql) is safe — the
+   `alternates` column is added with `add column if not exists ... default
+   '{}'`, so it won't touch your existing rows beyond giving them an empty
+   list. Skipping this step means the app's queries against `qa_entries`
+   will fail (the column won't exist yet), so run it once before using a
+   pre-existing table with this version of the app.
 
 `npm run dev` runs both servers with keyboard shortcuts:
 
@@ -222,18 +230,28 @@ counterpart doesn't pay.
    persists it. From then on, asking that question (or a close rewording)
    answers instantly from what you wrote — shown with a **`Saved`** badge —
    instead of calling Claude. `[edit]`/`[del]` manage entries in place.
+   Use the **"Other ways to ask this"** box (one phrasing per line) to list
+   other real phrasings of the same question — e.g. "Can you introduce
+   yourself?", "Walk me through your resume." — so all of them match the
+   same saved answer, not just the exact wording you typed first.
 6. **Search saved Q&A** — the search box in the drawer filters by keyword
    against the question text (every typed word must appear somewhere in the
    question, in any order) — handy once you've got more than a handful saved.
 7. **Bulk-import Q&A** — click **`⭱ Import`** in the Saved Q&A drawer and
-   pick a `.csv` (header row `question,answer`) or `.json` file (an array of
-   `{question, answer}` objects, or an object mapping questions to answers).
-   Rows missing either field, or whose question already matches something
-   saved, are skipped automatically — you get a summary of how many were
-   imported vs. skipped either way. Sample files to try it with (or use as a
-   template):
+   pick a `.csv` (header row `question,answer`, plus an optional `alternates`
+   column) or `.json` file (an array of `{question, answer, alternates}`
+   objects, or an object mapping questions to answers). `alternates` is a
+   list of other phrasings that should match the same saved answer — in CSV
+   it's one cell with entries separated by `|` (since `,` already separates
+   columns); in JSON it's a plain string array. Rows missing `question` or
+   `answer`, or whose question already matches something saved, are skipped
+   automatically — you get a summary of how many were imported vs. skipped
+   either way. Sample files to try it with (or use as a template):
    [`samples/qa-import-sample.csv`](samples/qa-import-sample.csv),
-   [`samples/qa-import-sample.json`](samples/qa-import-sample.json).
+   [`samples/qa-import-sample.json`](samples/qa-import-sample.json) — and for
+   the `alternates` column specifically:
+   [`samples/qa-alternates-template.csv`](samples/qa-alternates-template.csv),
+   [`samples/qa-alternates-template.json`](samples/qa-alternates-template.json).
 
 ## Scripts
 
@@ -266,6 +284,22 @@ counterpart doesn't pay.
   word. If a short saved question doesn't reliably match, double-check its
   exact wording in the drawer — matching only looks at the literal words
   saved, so "your self" (two words) won't match a query for "yourself".
+  If two real phrasings of a question share *no* real keywords at all (e.g.
+  "Walk me through your resume" vs. "Tell me about yourself?" — no common
+  vocabulary for coverage-matching to find), keyword matching alone can't
+  bridge them; add the second phrasing as an **alternate** on the saved entry
+  instead (see [Using it](#using-it) above) rather than trying to tune the
+  matching algorithm itself.
+- **AI grounding** ([`src/lib/qaMatch.ts`](src/lib/qaMatch.ts)'s
+  `findRelatedContext`, [`server/prompts.js`](server/prompts.js)): when
+  Claude answers because nothing saved matched exactly, up to 2 saved
+  entries that are *loosely* topically related to the question (not a full
+  match, just some shared keywords) are sent along as background so the
+  composed answer stays factually consistent with what's actually been
+  saved about you. This is deliberately looser than saved-Q&A matching
+  itself — its job is "worth keeping in mind," not "is this the same
+  question" — and it costs nothing extra when nothing related is found,
+  which is the common case for general-knowledge questions.
 - Chrome needs an internet connection for speech recognition, and requires
   **HTTPS** for the mic on any real domain (`localhost` is exempt).
 

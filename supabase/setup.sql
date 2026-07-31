@@ -12,6 +12,14 @@ create table if not exists public.qa_entries (
   created_at timestamptz not null default now()
 );
 
+-- Alternate phrasings for the same question ("Walk me through your resume"
+-- for a "Tell me about yourself?" entry) — added after the table already
+-- existed for some setups, so this is a migration, not part of the create
+-- above. `add column if not exists` is safe to re-run and won't touch
+-- existing rows beyond giving them the default empty array.
+alter table public.qa_entries
+  add column if not exists alternates text[] not null default '{}';
+
 alter table public.qa_entries enable row level security;
 
 drop policy if exists "qa anon select" on public.qa_entries;

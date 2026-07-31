@@ -786,6 +786,10 @@ textarea.qa-answer-input {
   content: "A: ";
   color: var(--muted);
 }
+.qa-alternates {
+  margin: 0.3rem 0 0;
+  font-size: 0.75rem;
+}
 
 .muted {
   color: var(--muted);
