@@ -8,7 +8,7 @@ import { askQuestion } from "./lib/api";
 import { DUPLICATE_THRESHOLD, similarity } from "./lib/dedupe";
 import { isQuestion } from "./lib/isQuestion";
 import { matchSavedQa } from "./lib/qaMatch";
-import { downloadTranscript } from "./lib/transcript";
+import { downloadQaTranscript, downloadTranscript } from "./lib/transcript";
 import type { RecordEntry } from "./types";
 
 interface CachedAnswer {
@@ -135,11 +135,25 @@ export default function App() {
     [aiEnabled, qa.entries, pushQa, patchQa],
   );
 
-  // Each finished utterance either gets answered (it reads as a question)
-  // or is just transcribed into the record.
+  // Ask mode: while on, every utterance is sent straight to ask() — no
+  // isQuestion() guessing. A ref (not just the state) because
+  // onFinalUtterance is a stable callback captured once by
+  // useSpeechRecognition's effect; reading state there would close over a
+  // stale value instead of whatever askMode actually is at the time each
+  // utterance comes in.
+  const [askMode, setAskMode] = useState(false);
+  const askModeRef = useRef(false);
+
+  // Each finished utterance either gets answered or is just transcribed
+  // into the record. isQuestion() is a heuristic (question words, sentence
+  // shape, the Tagalog "ba" particle) — it won't catch every real question,
+  // which is what ask mode is for: force it, no guessing. Recording itself
+  // never stops for this — toggling ask mode on/off only changes how new
+  // utterances are classified, on the same continuous session, so nothing
+  // said in between is ever missed.
   const onFinalUtterance = useCallback(
     (utterance: string) => {
-      if (isQuestion(utterance)) ask(utterance);
+      if (askModeRef.current || isQuestion(utterance)) ask(utterance);
       else addNote(utterance);
     },
     [ask, addNote],
@@ -147,6 +161,27 @@ export default function App() {
 
   const { supported, listening, interim, activeLang, toggle } =
     useSpeechRecognition(onFinalUtterance);
+
+  // Stopping the mic entirely also drops ask mode — there's nothing left
+  // listening for it to apply to.
+  const toggleListening = useCallback(() => {
+    if (listening) {
+      askModeRef.current = false;
+      setAskMode(false);
+    }
+    toggle();
+  }, [listening, toggle]);
+
+  // Turning ask mode on starts the mic too if it wasn't already running
+  // (so a single click is enough to start asking); turning it off just
+  // reverts to auto-detection without stopping the mic, so continuous
+  // recording carries on right through it either way.
+  const toggleAskMode = useCallback(() => {
+    const next = !askModeRef.current;
+    askModeRef.current = next;
+    setAskMode(next);
+    if (next && !listening) toggle();
+  }, [listening, toggle]);
 
   const busy = record.some((e) => e.kind === "qa" && e.pending);
 
@@ -204,13 +239,16 @@ export default function App() {
           listening={listening}
           busy={busy}
           interim={interim}
-          onToggleMic={toggle}
+          onToggleMic={toggleListening}
+          askMode={askMode}
+          onToggleAskMode={toggleAskMode}
           speechLang={activeLang}
           record={record}
           onAsk={ask}
           aiEnabled={aiEnabled}
           onToggleAi={toggleAi}
           onDownload={() => downloadTranscript(record)}
+          onDownloadQa={() => downloadQaTranscript(record)}
           onClear={handleClear}
           qaCount={qa.entries.length}
           qaOpen={qaOpen}

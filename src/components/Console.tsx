@@ -38,12 +38,15 @@ interface Props {
   busy: boolean;
   interim: string;
   onToggleMic: () => void;
+  askMode: boolean;
+  onToggleAskMode: () => void;
   speechLang: "en-US" | "fil-PH";
   record: RecordEntry[];
   onAsk: (question: string) => void;
   aiEnabled: boolean;
   onToggleAi: () => void;
   onDownload: () => void;
+  onDownloadQa: () => void;
   onClear: () => void;
   qaCount: number;
   qaOpen: boolean;
@@ -56,22 +59,39 @@ export function Console({
   busy,
   interim,
   onToggleMic,
+  askMode,
+  onToggleAskMode,
   speechLang,
   record,
   onAsk,
   aiEnabled,
   onToggleAi,
   onDownload,
+  onDownloadQa,
   onClear,
   qaCount,
   qaOpen,
   onToggleQa,
 }: Props) {
   const [typed, setTyped] = useState("");
-  const status = !listening ? "idle" : busy ? "thinking" : "listening";
-  const latestQa = record.find(
+  // The log can show everything (including plain transcribed notes — which
+  // is also where misheard/garbled fragments end up) or just the Q&A
+  // exchanges, filtered out from the noise. Independent of which is
+  // showing, both have their own download so you don't have to switch tabs
+  // just to get the other file.
+  const [view, setView] = useState<"all" | "qa">("all");
+  const status = !listening
+    ? "idle"
+    : askMode
+      ? "asking"
+      : busy
+        ? "thinking"
+        : "listening";
+  const qaEntries = record.filter(
     (e): e is Extract<RecordEntry, { kind: "qa" }> => e.kind === "qa",
   );
+  const latestQa = qaEntries[0];
+  const visibleRecord = view === "qa" ? qaEntries : record;
 
   const questionText = interim || latestQa?.question || "";
   const questionLive = Boolean(interim);
@@ -103,11 +123,19 @@ export function Console({
           </button>
           <button
             className="term-btn"
-            title="Download the whole record as .txt"
+            title="Download just the Q&A exchanges as .txt — no notes or misheard fragments"
+            onClick={onDownloadQa}
+            disabled={qaEntries.length === 0}
+          >
+            ⭳ Q&amp;A
+          </button>
+          <button
+            className="term-btn"
+            title="Download the whole record as .txt — every note and Q&A, in order"
             onClick={onDownload}
             disabled={record.length === 0}
           >
-            ⭳ Download
+            ⭳ Full Log
           </button>
           <button
             className="link-btn"
@@ -145,13 +173,29 @@ export function Console({
         </div>
 
         <div className="scrollback" aria-live="polite">
-          {record.length === 0 && (
+          <div className="scrollback-tabs">
+            <button
+              className={`tab-btn${view === "all" ? " active" : ""}`}
+              onClick={() => setView("all")}
+            >
+              Conversation
+            </button>
+            <button
+              className={`tab-btn${view === "qa" ? " active" : ""}`}
+              onClick={() => setView("qa")}
+            >
+              Q&amp;A only
+            </button>
+          </div>
+
+          {visibleRecord.length === 0 && (
             <p className="muted scrollback-empty">
-              No history yet. Speak or type below — the whole record (every
-              question and everything else you say) will scroll here.
+              {view === "qa"
+                ? "No questions answered yet."
+                : "No history yet. Speak or type below — the whole record (every question and everything else you say) will scroll here."}
             </p>
           )}
-          {record.map((e) =>
+          {visibleRecord.map((e) =>
             e.kind === "note" ? (
               <div className="log-entry" key={e.id}>
                 <p className="log-note">{e.text}</p>
@@ -181,9 +225,28 @@ export function Console({
           className={`round-btn${listening ? " on" : ""}`}
           onClick={onToggleMic}
           disabled={!supported}
-          title={listening ? "Stop listening" : "Start listening"}
+          title={
+            listening
+              ? "Stop listening"
+              : "Start listening — everything you say is transcribed, questions get auto-detected and answered"
+          }
         >
           {listening ? "⏸" : "▶"}
+        </button>
+
+        <button
+          className={`round-btn ask-btn${askMode ? " on" : ""}`}
+          onClick={onToggleAskMode}
+          disabled={!supported}
+          title={
+            askMode
+              ? "Turn off ask mode — back to auto-detecting questions (recording keeps going)"
+              : listening
+                ? "Switch to ask mode — everything you say from here is treated as a question, recording keeps going"
+                : "Ask a question by voice — starts listening and treats everything you say as a question until you turn it off"
+          }
+        >
+          ❓
         </button>
 
         <span

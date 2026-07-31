@@ -415,6 +415,39 @@ header h1 .caret {
 .scrollback-empty {
   margin: 0;
 }
+
+/* Sticky, flush with the scroll container's own edges despite its padding
+   (negative margins cancel the padding out, then re-add it as the tab
+   row's own padding) — stays visible at the top as you scroll through a
+   long log instead of scrolling away with the entries. */
+.scrollback-tabs {
+  position: sticky;
+  top: -0.8rem;
+  margin: -0.8rem -0.8rem 0;
+  padding: 0.5rem 0.8rem;
+  display: flex;
+  gap: 1rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  z-index: 1;
+}
+.tab-btn {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.05rem;
+}
+.tab-btn:hover {
+  color: var(--bright);
+}
+.tab-btn.active {
+  color: var(--green);
+  border-bottom-color: var(--green);
+}
 .log-entry {
   border-bottom: 1px dotted var(--border);
   padding-bottom: 0.7rem;
@@ -511,6 +544,18 @@ header h1 .caret {
   }
 }
 
+/* Idle color set apart from .round-btn's default green so the mic and Ask
+   buttons read as two distinct controls at rest — both still pulse red
+   while active, same "recording" cue as everywhere else in the app. */
+.ask-btn {
+  color: var(--cyan);
+  border-color: var(--cyan);
+}
+.ask-btn:hover {
+  background: var(--cyan);
+  color: var(--well);
+}
+
 .cmd-input {
   flex: 1;
   min-width: 0;
@@ -580,6 +625,10 @@ header h1 .caret {
 .status.thinking {
   color: var(--yellow);
   border-color: var(--yellow);
+}
+.status.asking {
+  color: var(--green);
+  border-color: var(--green);
 }
 
 /* ---------- File-list drawer ---------- */

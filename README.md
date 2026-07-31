@@ -189,26 +189,38 @@ counterpart doesn't pay.
    Every finished sentence is transcribed into the record on the right;
    sentences that read as a question (end like one, or start with _what,
    how, why, can you, tell me, explain…_) also get answered, everything else
-   is kept as plain text. Typing into the command-bar input and pressing
-   Enter always asks a question directly. The current exchange shows in the
-   **Question**/**Answer** boxes; the full record — notes and Q&A together,
-   in order — scrolls in the log to the right, newest first.
-2. **Download the record** — click **`⭳ Download`** at the top of the
-   console to save the whole record (everything transcribed, plus every
-   question and answer) as a timestamped `.txt` file.
-3. **Speak in Filipino/Tagalog** — just talk; no setup needed. The **`[EN]`/`[FIL]`**
+   is kept as plain text (including misheard/garbled fragments — the mic
+   picks up whatever it hears, not just clean speech). Typing into the
+   command-bar input and pressing Enter always asks a question directly. The
+   current exchange shows in the **Question**/**Answer** boxes.
+2. **Ask by voice without relying on detection** — click **❓** to turn on
+   ask mode: everything you say from then on is sent straight to be
+   answered, no question-shaped wording required, unlike ▶'s auto-detection.
+   Click ❓ again to turn it back off. Recording never stops for this — ❓
+   is a toggle on the *same* continuous session (it'll start ▶ for you if
+   it wasn't already running), not a separate one, so nothing said while
+   switching between modes is ever missed. Turning ▶ off stops everything,
+   including ask mode.
+3. **Switch between the full log and Q&A only** — two tabs sit above the
+   scrolling log: **Conversation** (everything, notes included — newest
+   first) and **Q&A only** (just the question/answer exchanges, with the
+   noise filtered out). Each has its own **`⭳ Q&A`** / **`⭳ Full Log`**
+   download button at the top of the console, independent of which tab is
+   currently showing — you don't need to switch tabs just to get the other
+   file. Both save a timestamped `.txt`.
+4. **Speak in Filipino/Tagalog** — just talk; no setup needed. The **`[EN]`/`[FIL]`**
    badge next to the mic button shows what it's currently listening for and
    switches on its own as your speech shifts between languages. Either way,
    Claude understands the question and answers in English.
-4. **Save your own Q&A** — click **`[?]`** in the command bar to open the
+5. **Save your own Q&A** — click **`[?]`** in the command bar to open the
    Saved Q&A drawer. Type a question and its exact answer, **`+ Save Q&A`**
    persists it. From then on, asking that question (or a close rewording)
    answers instantly from what you wrote — shown with a **`Saved`** badge —
    instead of calling Claude. `[edit]`/`[del]` manage entries in place.
-5. **Search saved Q&A** — the search box in the drawer filters by keyword
+6. **Search saved Q&A** — the search box in the drawer filters by keyword
    against the question text (every typed word must appear somewhere in the
    question, in any order) — handy once you've got more than a handful saved.
-6. **Bulk-import Q&A** — click **`⭱ Import`** in the Saved Q&A drawer and
+7. **Bulk-import Q&A** — click **`⭱ Import`** in the Saved Q&A drawer and
    pick a `.csv` (header row `question,answer`) or `.json` file (an array of
    `{question, answer}` objects, or an object mapping questions to answers).
    Rows missing either field, or whose question already matches something
