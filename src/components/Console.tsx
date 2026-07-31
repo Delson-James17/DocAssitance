@@ -74,12 +74,14 @@ export function Console({
   onToggleQa,
 }: Props) {
   const [typed, setTyped] = useState("");
-  // The log can show everything (including plain transcribed notes — which
-  // is also where misheard/garbled fragments end up) or just the Q&A
-  // exchanges, filtered out from the noise. Independent of which is
-  // showing, both have their own download so you don't have to switch tabs
-  // just to get the other file.
-  const [view, setView] = useState<"all" | "qa">("all");
+  // Conversation is the full transcript of everything said — every note,
+  // *and* every question exactly as spoken/typed, since a question is still
+  // something that was said and belongs in the record of the conversation.
+  // What's exclusive to Q&A only is the generated *answer*: Conversation
+  // renders a qa entry as just its question line (see the view === "notes"
+  // branch below), never the answer or its source badge. Each tab has its
+  // own download regardless of which is currently showing.
+  const [view, setView] = useState<"notes" | "qa">("notes");
   const status = !listening
     ? "idle"
     : askMode
@@ -93,8 +95,16 @@ export function Console({
   const latestQa = qaEntries[0];
   const visibleRecord = view === "qa" ? qaEntries : record;
 
-  const questionText = interim || latestQa?.question || "";
-  const questionLive = Boolean(interim);
+  // Live partial speech only belongs in the Question box while ask mode is
+  // actually on — otherwise plain listening would flash whatever's
+  // currently being said through the box, then revert once it turns out
+  // not to be a question, which just looks broken. Recording into the
+  // Conversation tab (via App.tsx's onFinalUtterance/addNote) doesn't go
+  // through this component at all, so it keeps going exactly the same
+  // regardless of what these boxes show — this is purely a display filter,
+  // not a gate on what actually gets recorded.
+  const questionText = (askMode ? interim : "") || latestQa?.question || "";
+  const questionLive = askMode && Boolean(interim);
 
   function submitTyped() {
     const q = typed.trim();
@@ -175,8 +185,8 @@ export function Console({
         <div className="scrollback" aria-live="polite">
           <div className="scrollback-tabs">
             <button
-              className={`tab-btn${view === "all" ? " active" : ""}`}
-              onClick={() => setView("all")}
+              className={`tab-btn${view === "notes" ? " active" : ""}`}
+              onClick={() => setView("notes")}
             >
               Conversation
             </button>
@@ -191,16 +201,26 @@ export function Console({
           {visibleRecord.length === 0 && (
             <p className="muted scrollback-empty">
               {view === "qa"
-                ? "No questions answered yet."
-                : "No history yet. Speak or type below — the whole record (every question and everything else you say) will scroll here."}
+                ? "No questions answered yet — turn on ❓ ask mode, or type a question below."
+                : "No history yet. Speak below — everything you say (including questions) is transcribed here, word for word."}
             </p>
           )}
-          {visibleRecord.map((e) =>
-            e.kind === "note" ? (
-              <div className="log-entry" key={e.id}>
-                <p className="log-note">{e.text}</p>
-              </div>
-            ) : (
+          {visibleRecord.map((e) => {
+            // Conversation is a uniform plain-text transcript — a question
+            // renders exactly like a note (same "»" prefix, no "C:\>"
+            // prompt), since here it's just something that was said, not
+            // yet an interaction with an answer. Q&A only is where the
+            // command-prompt framing and the answer itself belong.
+            if (view === "notes") {
+              const text = e.kind === "note" ? e.text : e.question;
+              return (
+                <div className="log-entry" key={e.id}>
+                  <p className="log-note">{text}</p>
+                </div>
+              );
+            }
+            if (e.kind !== "qa") return null;
+            return (
               <div className="log-entry" key={e.id}>
                 <p className="log-q">
                   <span className="prompt-chevron">C:\&gt;</span> {e.question}
@@ -215,8 +235,8 @@ export function Console({
                   <SourceTag source={e.source} /> {e.error ? `⚠ ${e.error}` : e.answer}
                 </p>
               </div>
-            ),
-          )}
+            );
+          })}
         </div>
       </div>
 
@@ -228,7 +248,7 @@ export function Console({
           title={
             listening
               ? "Stop listening"
-              : "Start listening — everything you say is transcribed, questions get auto-detected and answered"
+              : "Start listening — everything you say is transcribed as plain text, nothing is answered automatically"
           }
         >
           {listening ? "⏸" : "▶"}
@@ -240,10 +260,10 @@ export function Console({
           disabled={!supported}
           title={
             askMode
-              ? "Turn off ask mode — back to auto-detecting questions (recording keeps going)"
+              ? "Turn off ask mode — back to plain transcription (recording keeps going)"
               : listening
-                ? "Switch to ask mode — everything you say from here is treated as a question, recording keeps going"
-                : "Ask a question by voice — starts listening and treats everything you say as a question until you turn it off"
+                ? "Switch to ask mode — everything you say from here is answered instead of just transcribed, recording keeps going"
+                : "Ask a question by voice — starts listening and answers everything you say until you turn it off"
           }
         >
           ❓

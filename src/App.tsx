@@ -6,7 +6,6 @@ import { useSpeechRecognition } from "./hooks/useSpeechRecognition";
 import { useTheme } from "./hooks/useTheme";
 import { askQuestion } from "./lib/api";
 import { DUPLICATE_THRESHOLD, similarity } from "./lib/dedupe";
-import { isQuestion } from "./lib/isQuestion";
 import { matchSavedQa } from "./lib/qaMatch";
 import { downloadQaTranscript, downloadTranscript } from "./lib/transcript";
 import type { RecordEntry } from "./types";
@@ -135,8 +134,8 @@ export default function App() {
     [aiEnabled, qa.entries, pushQa, patchQa],
   );
 
-  // Ask mode: while on, every utterance is sent straight to ask() — no
-  // isQuestion() guessing. A ref (not just the state) because
+  // Ask mode: while on, every utterance is sent straight to ask() instead
+  // of just being transcribed. A ref (not just the state) because
   // onFinalUtterance is a stable callback captured once by
   // useSpeechRecognition's effect; reading state there would close over a
   // stale value instead of whatever askMode actually is at the time each
@@ -144,16 +143,16 @@ export default function App() {
   const [askMode, setAskMode] = useState(false);
   const askModeRef = useRef(false);
 
-  // Each finished utterance either gets answered or is just transcribed
-  // into the record. isQuestion() is a heuristic (question words, sentence
-  // shape, the Tagalog "ba" particle) — it won't catch every real question,
-  // which is what ask mode is for: force it, no guessing. Recording itself
-  // never stops for this — toggling ask mode on/off only changes how new
-  // utterances are classified, on the same continuous session, so nothing
-  // said in between is ever missed.
+  // Plain listening never auto-answers, even if something sounds like a
+  // question — it's a pure, accurate transcript of whatever was actually
+  // heard, nothing guessed or interpreted. The only way to get an answer
+  // from voice is to explicitly say so via ask mode (❓); typing a question
+  // always answers it too. Recording itself never stops when ask mode
+  // toggles on/off — it only changes how new utterances are classified, on
+  // the same continuous session, so nothing said in between is ever missed.
   const onFinalUtterance = useCallback(
     (utterance: string) => {
-      if (askModeRef.current || isQuestion(utterance)) ask(utterance);
+      if (askModeRef.current) ask(utterance);
       else addNote(utterance);
     },
     [ask, addNote],
@@ -227,9 +226,9 @@ export default function App() {
           Voice Doc Assistant<span className="caret">&nbsp;</span>
         </h1>
         <p className="tagline">
-          Start talking. Everything you say is recorded as text — questions
-          get answered from your saved Q&A or Claude, everything else just
-          joins the log.
+          Start talking — everything you say is transcribed as plain text.
+          Turn on ❓ ask mode (or just type) to get an answer from your saved
+          Q&A or Claude.
         </p>
       </header>
 

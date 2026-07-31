@@ -4,10 +4,13 @@ Real-time speech-to-text that keeps a **running transcript of everything you
 say**, and **answers your questions** from a saved Q&A table you curate, or
 from Claude.
 
-Talk naturally (or just type). Every finished utterance is transcribed into
-the record; ones that read as a question get answered and streamed to the
-screen, everything else just joins the log as plain text. The whole record
-can be downloaded as a `.txt` file at any time.
+Talk naturally (or just type) and every finished utterance is transcribed
+into the record, word for word — plain listening never guesses at what's a
+question and never answers on its own, so the transcript stays an accurate
+record of what was actually said. Turn on **ask mode** (or just type) when
+you want something answered, streamed to the screen as it comes in. The
+record can be downloaded as a `.txt` file — either the whole conversation,
+or just the Q&A exchanges — at any time.
 
 Built with **Vite + React + TypeScript** on the front end and an **Express**
 backend that holds your API key.
@@ -15,10 +18,11 @@ backend that holds your API key.
 ## How it works
 
 ```
-Browser mic ──► Web Speech API (live transcript)      Typed question ──┐
-                      │  question?  │  no → append to the record        │
-                      │ yes                                             │
-                      ▼                                                 ▼
+Browser mic ──► Web Speech API (live transcript) ──► joins the record, verbatim
+                                                            ▲
+Ask mode (❓) or a typed question ─────────────────────────┘
+                      │
+                      ▼
                     1. Saved Q&A match?  ──yes──► answer instantly, free
                       │ no
                       ▼
@@ -32,13 +36,13 @@ Browser mic ──► Web Speech API (live transcript)      Typed question ─�
 ```
 
 - **Speech-to-text** uses the browser's built-in Web Speech API — no audio keys, works in Chrome/Edge. It **auto-detects English vs. Filipino/Tagalog** ([`src/lib/detectLang.ts`](src/lib/detectLang.ts)): after each utterance it checks for common Tagalog words and switches the recognizer language for the *next* one if needed — no manual toggle. The **`[EN]`/`[FIL]`** badge in the command bar just shows which one is currently active. (The Web Speech API can only listen in one language at a time, so this adapts going forward rather than detecting both simultaneously — it can't un-garble an utterance recognized in the wrong language after the fact.)
-- **Question detection** ([`src/lib/isQuestion.ts`](src/lib/isQuestion.ts)) recognizes English and Filipino/Tagalog question words (plus the Tagalog "ba" particle) to decide, per utterance, whether it gets answered or just recorded as text.
+- **Plain listening (▶) never guesses.** Everything heard is transcribed as-is, including misheard/garbled fragments — there's no "does this sound like a question" heuristic trying (and sometimes failing) to decide what to answer. **Ask mode (❓)** is the explicit, reliable way to get a spoken question answered — see [Using it](#using-it) below.
 - **Language**: questions can be asked in English, Filipino/Tagalog, or a Taglish mix — Claude understands either and answers in English by default (see [`server/prompts.js`](server/prompts.js)).
 - The backend holds your API key so it's never exposed to the browser.
 - **Saved Q&A** (**`[?]`** in the command bar) lets you type your own question/answer pairs and save them — a close match always wins over Claude, so you get a guaranteed-correct, zero-cost answer for anything you've curated, with no risk of Claude answering the wrong thing. Persisted in Supabase (a Postgres table) so it survives server restarts.
 - **Bulk-import Q&A** from a `.csv` or `.json` file — see [Using it](#using-it) below.
 - If AI is on and nothing saved matches, Claude answers from its own general knowledge (see [`server/prompts.js`](server/prompts.js)).
-- The whole record (notes + questions + answers, in order) can be **downloaded as a `.txt` file**.
+- The **Conversation** tab is a full transcript of everything said, questions included; **Q&A only** additionally shows the generated answer for each — the answer itself is the only thing exclusive to Q&A only. Each has its own **downloadable `.txt` file**.
 - The UI is styled like a **command-prompt window**.
 
 ## Project layout
@@ -74,7 +78,7 @@ modules with the web layer kept separate from business logic.
 │   ├── hooks/
 │   │   ├── useSpeechRecognition.ts   Web Speech API wrapper
 │   │   └── useQa.ts                  Saved Q&A list + add/update/remove/import state
-│   └── lib/               api.ts (backend client), isQuestion.ts, qaMatch.ts (keyword-coverage saved-Q&A matching), qaImport.ts (.csv/.json parsing), dedupe.ts (near-duplicate detection), transcript.ts (build/download record)
+│   └── lib/               api.ts (backend client), qaMatch.ts (keyword-coverage saved-Q&A matching), qaImport.ts (.csv/.json parsing), dedupe.ts (near-duplicate detection), transcript.ts (build/download record, whole or Q&A-only)
 ├── samples/               qa-import-sample.csv / .json — try the bulk import with these
 └── .env                   ANTHROPIC_API_KEY + SUPABASE_* (git-ignored)
 ```
@@ -185,29 +189,30 @@ counterpart doesn't pay.
 
 ## Using it
 
-1. **Talk, or ask a question** — click the round **▶** button and just talk.
-   Every finished sentence is transcribed into the record on the right;
-   sentences that read as a question (end like one, or start with _what,
-   how, why, can you, tell me, explain…_) also get answered, everything else
-   is kept as plain text (including misheard/garbled fragments — the mic
-   picks up whatever it hears, not just clean speech). Typing into the
-   command-bar input and pressing Enter always asks a question directly. The
-   current exchange shows in the **Question**/**Answer** boxes.
-2. **Ask by voice without relying on detection** — click **❓** to turn on
-   ask mode: everything you say from then on is sent straight to be
-   answered, no question-shaped wording required, unlike ▶'s auto-detection.
-   Click ❓ again to turn it back off. Recording never stops for this — ❓
-   is a toggle on the *same* continuous session (it'll start ▶ for you if
-   it wasn't already running), not a separate one, so nothing said while
-   switching between modes is ever missed. Turning ▶ off stops everything,
-   including ask mode.
-3. **Switch between the full log and Q&A only** — two tabs sit above the
-   scrolling log: **Conversation** (everything, notes included — newest
-   first) and **Q&A only** (just the question/answer exchanges, with the
-   noise filtered out). Each has its own **`⭳ Q&A`** / **`⭳ Full Log`**
-   download button at the top of the console, independent of which tab is
-   currently showing — you don't need to switch tabs just to get the other
-   file. Both save a timestamped `.txt`.
+1. **Talk** — click the round **▶** button and just talk. Every finished
+   sentence is transcribed into the record verbatim, including
+   misheard/garbled fragments (the mic picks up whatever it hears) — plain
+   listening never tries to guess what's a question and never answers on
+   its own. Typing into the command-bar input and pressing Enter always
+   asks a question directly, regardless of whether ▶ or ❓ is on.
+2. **Ask a question by voice** — click **❓** to turn on ask mode:
+   everything you say from then on is sent straight to be answered instead
+   of just transcribed. Click ❓ again to turn it back off. Recording never
+   stops for this — ❓ is a toggle on the *same* continuous session (it'll
+   start ▶ for you if it wasn't already running), not a separate one, so
+   nothing said while switching between modes is ever missed. Turning ▶ off
+   stops everything, including ask mode. The current exchange shows in the
+   **Question**/**Answer** boxes.
+3. **Switch between the transcript and Q&A only** — two tabs sit above the
+   scrolling log: **Conversation** (everything said, newest first — plain
+   notes *and* every question exactly as asked, since a question is still
+   part of what was said) and **Q&A only** (the question/answer exchanges,
+   with the generated answer). A question always appears on both, since it
+   was both said *and* answered — the one thing exclusive to Q&A only is the
+   answer itself; Conversation never shows it, just the question line. Each
+   tab has its own **`⭳ Q&A`** / **`⭳ Full Log`** download button at the
+   top of the console, independent of which tab is currently showing. Both
+   save a timestamped `.txt`.
 4. **Speak in Filipino/Tagalog** — just talk; no setup needed. The **`[EN]`/`[FIL]`**
    badge next to the mic button shows what it's currently listening for and
    switches on its own as your speech shifts between languages. Either way,
@@ -241,8 +246,10 @@ counterpart doesn't pay.
 
 ## Notes & tuning
 
-- **What counts as a question** lives in [`src/lib/isQuestion.ts`](src/lib/isQuestion.ts)
-  — tweak it to change how eagerly it answers, or switch to a wake word.
+- **Voice questions only ever come from ask mode (❓)** — plain listening
+  (▶) has no question-detection heuristic to tune; it's a deliberate design
+  choice so the Conversation tab stays an accurate, unedited transcript
+  rather than something that occasionally misfires into an unwanted answer.
 - **The model & answer style** are set in [`server/config.js`](server/config.js)
   (`model`, currently `claude-sonnet-5`) and [`server/prompts.js`](server/prompts.js)
   (`SYSTEM_PROMPT`). It defaults to short, conversational answers.
