@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Console } from "./components/Console";
 import { QaPanel } from "./components/QaPanel";
 import { useQa } from "./hooks/useQa";
@@ -192,6 +192,52 @@ export default function App() {
     setAskMode(next);
     if (next && !listening) toggle();
   }, [listening, toggle]);
+
+  // Global keyboard shortcuts — a fallback for when clicking is inconvenient
+  // mid-practice. "." and space mirror the ▶/❓ buttons exactly (same
+  // toggles, same behavior); any digit or letter key instantly recalls
+  // whichever saved entry has that quick key assigned (see QaPanel.tsx),
+  // pushing it
+  // into the record and mini boxes exactly like a live saved-Q&A match
+  // would — a manual override for the questions you most need on hand in
+  // case voice or typing lets you down. Ignored while focus is in any
+  // editable field so normal typing (the command bar, the Saved Q&A forms)
+  // is never hijacked.
+  useEffect(() => {
+    function isEditableTarget(target: EventTarget | null): boolean {
+      if (!(target instanceof HTMLElement)) return false;
+      const tag = target.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
+    }
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (isEditableTarget(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
+
+      if (e.key === ".") {
+        e.preventDefault();
+        toggleListening();
+        return;
+      }
+      if (e.key === " ") {
+        e.preventDefault();
+        toggleAskMode();
+        return;
+      }
+      // Case-insensitive: an entry assigned "q" answers to Q as well, so a
+      // stray caps lock can't cost you the shortcut.
+      const key = e.key.toLowerCase();
+      if (/^[a-z0-9]$/.test(key)) {
+        const entry = qa.entries.find((en) => en.hotkey === key);
+        if (entry) {
+          e.preventDefault();
+          pushQa({ question: entry.question, answer: entry.answer, pending: false, source: "saved" });
+        }
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [qa.entries, toggleListening, toggleAskMode, pushQa]);
 
   const busy = record.some((e) => e.kind === "qa" && e.pending);
 

@@ -10,6 +10,13 @@ export interface QaEntry {
   // words, which keyword matching alone can never bridge on its own.
   alternates: string[];
   answer: string;
+  // A single quick-recall key — one lowercase character, either a digit
+  // (0-9) or a letter (a-z) — or null if unassigned. Pressing that key (see
+  // App.tsx's global keydown handler) instantly shows this entry's answer
+  // on screen — a manual fallback for the questions you most need on hand,
+  // independent of voice/typed matching in case either one fails you
+  // mid-practice. At most one entry can hold a given key at a time.
+  hotkey: string | null;
   createdAt: string;
 }
 

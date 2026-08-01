@@ -771,6 +771,30 @@ textarea.qa-answer-input {
   font-weight: 600;
   font-size: 0.85rem;
   color: var(--bright);
+  flex: 1;
+  min-width: 0;
+}
+.qa-item-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+.hotkey-select {
+  background: var(--panel-bg, transparent);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 0.7rem;
+  padding: 0.1rem 0.3rem;
+  font-family: inherit;
+  /* Options carry an "(in use)" suffix, which a select would otherwise size
+     itself around — capped so the control can't push the question text out
+     of the row. The open dropdown still shows every label in full. */
+  max-width: 8.5rem;
+}
+.hotkey-select:hover {
+  color: var(--text);
 }
 .qa-question::before {
   content: "Q: ";

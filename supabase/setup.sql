@@ -20,6 +20,34 @@ create table if not exists public.qa_entries (
 alter table public.qa_entries
   add column if not exists alternates text[] not null default '{}';
 
+-- Quick-recall key: a single character (a digit 0-9 or a letter a-z).
+-- Pressing that key in the app instantly shows this entry's answer,
+-- bypassing voice/typed matching entirely — a manual fallback for the
+-- questions you most need on hand. Nullable, no default, since most entries
+-- won't have one; the app enforces "at most one entry per key" itself
+-- rather than a DB constraint.
+alter table public.qa_entries
+  add column if not exists hotkey text;
+
+-- Earlier versions stored the hotkey as a `smallint` (digits 1-9 only).
+-- Widening it to `text` is what lets letters be assigned too; converting in
+-- place keeps whatever numbers were already assigned working, since "7"
+-- as text is still the 7 key. No-op once the column is already text, so
+-- this stays safe to re-run alongside the rest of the script.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'qa_entries'
+      and column_name = 'hotkey'
+      and data_type <> 'text'
+  ) then
+    alter table public.qa_entries
+      alter column hotkey type text using hotkey::text;
+  end if;
+end $$;
+
 alter table public.qa_entries enable row level security;
 
 drop policy if exists "qa anon select" on public.qa_entries;

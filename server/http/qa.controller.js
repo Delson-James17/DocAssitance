@@ -28,6 +28,21 @@ function cleanAlternates(raw, question) {
 }
 
 /**
+ * Parses a submitted hotkey value down to a single lowercase character —
+ * a digit (0-9) or a letter (a-z) — or `null` to unassign. Anything else
+ * (a whole word, punctuation, empty) is treated as "unassign" rather than
+ * an error, since this is a convenience feature, not part of the API's real
+ * data contract.
+ *
+ * @param {unknown} raw
+ * @returns {string | null}
+ */
+function cleanHotkey(raw) {
+  const key = (raw ?? "").toString().trim().toLowerCase();
+  return /^[a-z0-9]$/.test(key) ? key : null;
+}
+
+/**
  * HTTP handlers for the manually-curated Q&A table.
  *
  * @param {ReturnType<import("../services/qa.store.js").createQaStore>} store
@@ -86,7 +101,18 @@ export function createQaController(store) {
       if (req.body?.alternates !== undefined) {
         fields.alternates = cleanAlternates(req.body.alternates, fields.question ?? "");
       }
+      if (req.body?.hotkey !== undefined) {
+        fields.hotkey = cleanHotkey(req.body.hotkey);
+      }
       try {
+        // Only one entry can hold a given quick-recall key at a time — if
+        // another entry already has the one being assigned here, it loses
+        // it, the same way a radio button steals selection from its group.
+        if (fields.hotkey) {
+          const all = await store.list();
+          const conflict = all.find((e) => e.hotkey === fields.hotkey && e.id !== req.params.id);
+          if (conflict) await store.update(conflict.id, { hotkey: null });
+        }
         const entry = await store.update(req.params.id, fields);
         if (!entry) return res.status(404).json({ error: "Entry not found." });
         res.json({ entries: await store.list() });

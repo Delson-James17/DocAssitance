@@ -37,6 +37,12 @@ function cleanAlternates(raw, question) {
   return cleaned;
 }
 
+// See server/http/qa.controller.js's cleanHotkey for the same logic.
+function cleanHotkey(raw) {
+  const key = (raw ?? "").toString().trim().toLowerCase();
+  return /^[a-z0-9]$/.test(key) ? key : null;
+}
+
 export default async (req) => {
   const store = createQaStore();
   const segments = new URL(req.url).pathname.split("/").filter(Boolean);
@@ -86,6 +92,16 @@ export default async (req) => {
       }
       if (body?.alternates !== undefined) {
         fields.alternates = cleanAlternates(body.alternates, fields.question ?? "");
+      }
+      if (body?.hotkey !== undefined) {
+        fields.hotkey = cleanHotkey(body.hotkey);
+      }
+      // Only one entry can hold a given quick-recall key at a time — see
+      // server/http/qa.controller.js's update handler for the same logic.
+      if (fields.hotkey) {
+        const all = await store.list();
+        const conflict = all.find((e) => e.hotkey === fields.hotkey && e.id !== rest[0]);
+        if (conflict) await store.update(conflict.id, { hotkey: null });
       }
       const entry = await store.update(rest[0], fields);
       if (!entry) return json({ error: "Entry not found." }, { status: 404 });

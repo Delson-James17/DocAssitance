@@ -42,6 +42,7 @@ Ask mode (❓) or a typed question ───────────────
 - The backend holds your API key so it's never exposed to the browser.
 - **Saved Q&A** (**`[?]`** in the command bar) lets you type your own question/answer pairs and save them — a close match always wins over Claude, so you get a guaranteed-correct, zero-cost answer for anything you've curated, with no risk of Claude answering the wrong thing. Persisted in Supabase (a Postgres table) so it survives server restarts. Each entry can also list **alternates** — other ways the same question tends to get asked (e.g. "Walk me through your resume" for "Tell me about yourself?") — so differently-worded but same-meaning questions all match the one saved answer instead of only the exact wording you first typed.
 - **Bulk-import Q&A** from a `.csv` or `.json` file — see [Using it](#using-it) below.
+- **Quick-recall keys**: assign any saved entry a key (`0-9` or any letter `A-Z` — 36 in all) and pressing that key instantly shows its answer on screen — a manual fallback for your most-needed questions, independent of voice or typed matching. Plus keyboard shortcuts for the two round buttons (**`.`** / **space**) — see [Using it](#using-it) below.
 - If AI is on and nothing saved matches exactly, Claude answers from its own general knowledge (see [`server/prompts.js`](server/prompts.js)) — but if the question is loosely related to something you've saved (say, a project or a strength that's connected to the question but not an exact match), Claude is quietly given that saved Q&A as background so its composed answer stays consistent with what you've actually written about yourself, instead of inventing an unrelated persona. Unrelated general-knowledge questions (e.g. "What is AWS?") don't trigger this at all — no saved data is ever sent unless it's actually related to the question.
 - The **Conversation** tab is a full transcript of everything said, questions included; **Q&A only** additionally shows the generated answer for each — the answer itself is the only thing exclusive to Q&A only. Each has its own **downloadable `.txt` file**.
 - The UI is styled like a **command-prompt window**.
@@ -122,13 +123,16 @@ server restarts and can be managed from the UI.
    the service-role key bypasses RLS entirely.
 3. If Supabase isn't configured at all, the app still runs — saved Q&A just
    lives in memory for that server session.
-4. **Already have a `qa_entries` table from before `alternates` existed?**
-   Re-running [`supabase/setup.sql`](supabase/setup.sql) is safe — the
-   `alternates` column is added with `add column if not exists ... default
-   '{}'`, so it won't touch your existing rows beyond giving them an empty
-   list. Skipping this step means the app's queries against `qa_entries`
-   will fail (the column won't exist yet), so run it once before using a
-   pre-existing table with this version of the app.
+4. **Already have a `qa_entries` table from before `alternates`/`hotkey`
+   existed?** Re-running [`supabase/setup.sql`](supabase/setup.sql) is safe —
+   both columns are added with `add column if not exists`, so it won't touch
+   your existing rows beyond giving them an empty `alternates` list and a
+   blank `hotkey`. It also widens an older numbers-only `hotkey` column
+   (`smallint`) to `text` so letters can be assigned as quick keys — quick
+   keys you'd already set are converted, not dropped. Skipping this step
+   means the app's queries against
+   `qa_entries` will fail (the columns won't exist yet), so run it once
+   before using a pre-existing table with this version of the app.
 
 `npm run dev` runs both servers with keyboard shortcuts:
 
@@ -252,6 +256,24 @@ counterpart doesn't pay.
    the `alternates` column specifically:
    [`samples/qa-alternates-template.csv`](samples/qa-alternates-template.csv),
    [`samples/qa-alternates-template.json`](samples/qa-alternates-template.json).
+8. **Quick-recall keys** — for the questions you most need on hand, assign
+   any saved entry a key via the **"Quick key"** dropdown next to it in the
+   Saved Q&A drawer. Any digit (**`0-9`**) or letter (**`A-Z`**) works — 36
+   entries can be reachable at once — and the dropdown is laid out like the
+   keyboard itself (number row, then the three QWERTY rows), marking the
+   keys another entry already holds. Pressing that key on your keyboard
+   (while not typing in any text field) instantly shows that entry's answer
+   in the Question/Answer boxes and adds it to the record — a manual
+   fallback in case voice input or typing lets you down mid-practice. Caps
+   don't matter: an entry on **`q`** answers to **`Q`** too. Only one entry
+   can hold a given key at a time; assigning it elsewhere takes it from
+   whoever had it. This and the **`.`** / **space** shortcuts below work
+   anywhere in the app except while a text field has focus.
+9. **Keyboard shortcuts** — **`.`** toggles the round **▶** record button,
+   and **space** toggles **❓** ask mode, exactly like clicking them — handy
+   for switching without reaching for the mouse mid-practice. Both are
+   ignored while typing in the command bar or the Saved Q&A drawer, so
+   normal typing is never interrupted.
 
 ## Scripts
 

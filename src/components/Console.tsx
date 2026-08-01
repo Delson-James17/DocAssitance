@@ -246,9 +246,10 @@ export function Console({
           onClick={onToggleMic}
           disabled={!supported}
           title={
-            listening
+            (listening
               ? "Stop listening"
-              : "Start listening — everything you say is transcribed as plain text, nothing is answered automatically"
+              : "Start listening — everything you say is transcribed as plain text, nothing is answered automatically") +
+            " (shortcut: .)"
           }
         >
           {listening ? "⏸" : "▶"}
@@ -259,11 +260,12 @@ export function Console({
           onClick={onToggleAskMode}
           disabled={!supported}
           title={
-            askMode
+            (askMode
               ? "Turn off ask mode — back to plain transcription (recording keeps going)"
               : listening
                 ? "Switch to ask mode — everything you say from here is answered instead of just transcribed, recording keeps going"
-                : "Ask a question by voice — starts listening and answers everything you say until you turn it off"
+                : "Ask a question by voice — starts listening and answers everything you say until you turn it off") +
+            " (shortcut: space)"
           }
         >
           ❓

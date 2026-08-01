@@ -33,7 +33,7 @@ export async function addQa(
 
 export async function updateQa(
   id: string,
-  fields: { question?: string; answer?: string; alternates?: string[] },
+  fields: { question?: string; answer?: string; alternates?: string[]; hotkey?: string | null },
 ): Promise<QaEntry[]> {
   return unwrapQa(
     await fetch(`/api/qa/${encodeURIComponent(id)}`, {

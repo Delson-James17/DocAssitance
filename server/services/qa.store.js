@@ -4,7 +4,7 @@ import { supabase, supabaseEnabled } from "./supabase.client.js";
 const TABLE = "qa_entries";
 
 /**
- * @typedef {{ id: string, question: string, alternates: string[], answer: string, createdAt: string }} QaEntry
+ * @typedef {{ id: string, question: string, alternates: string[], answer: string, hotkey: string | null, createdAt: string }} QaEntry
  */
 
 /**
@@ -22,7 +22,7 @@ export function createQaStore() {
     try {
       const { data, error } = await supabase
         .from(TABLE)
-        .select("id, question, alternates, answer, created_at")
+        .select("id, question, alternates, answer, hotkey, created_at")
         .order("created_at", { ascending: true });
       if (error) throw error;
       for (const row of data ?? []) {
@@ -31,6 +31,7 @@ export function createQaStore() {
           question: row.question,
           alternates: row.alternates ?? [],
           answer: row.answer,
+          hotkey: row.hotkey ?? null,
           createdAt: row.created_at,
         });
       }
@@ -59,6 +60,7 @@ export function createQaStore() {
         question,
         alternates,
         answer,
+        hotkey: null,
         createdAt: new Date().toISOString(),
       };
       entries.set(entry.id, entry);
@@ -96,6 +98,7 @@ export function createQaStore() {
         question,
         alternates,
         answer,
+        hotkey: null,
         createdAt,
       }));
       for (const entry of newEntries) entries.set(entry.id, entry);

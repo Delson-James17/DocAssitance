@@ -7,7 +7,7 @@ interface UseQa {
   add: (question: string, answer: string, alternates?: string[]) => Promise<void>;
   update: (
     id: string,
-    fields: { question?: string; answer?: string; alternates?: string[] },
+    fields: { question?: string; answer?: string; alternates?: string[]; hotkey?: string | null },
   ) => Promise<void>;
   remove: (id: string) => Promise<void>;
   // Resolves to how many pairs actually got saved, so the caller (the
@@ -35,7 +35,10 @@ export function useQa(): UseQa {
   }, []);
 
   const update = useCallback(
-    async (id: string, fields: { question?: string; answer?: string; alternates?: string[] }) => {
+    async (
+      id: string,
+      fields: { question?: string; answer?: string; alternates?: string[]; hotkey?: string | null },
+    ) => {
       try {
         setEntries(await updateQa(id, fields));
       } catch (err) {

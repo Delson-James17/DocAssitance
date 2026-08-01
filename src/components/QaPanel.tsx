@@ -16,13 +16,26 @@ function parseAlternates(text: string): string[] {
   );
 }
 
+// The assignable quick-recall keys, grouped the way they physically sit on
+// the keyboard so the dropdown reads like the thing you're about to press:
+// the number row first, then the three QWERTY letter rows. 36 keys in all —
+// far more entries can be reached instantly than the digits alone allowed.
+// "." and space are deliberately left out: they're already the record / ask
+// mode shortcuts (see App.tsx).
+const HOTKEY_ROWS: { label: string; keys: string[] }[] = [
+  { label: "Number row", keys: [..."1234567890"] },
+  { label: "QWERTY row", keys: [..."qwertyuiop"] },
+  { label: "Home row", keys: [..."asdfghjkl"] },
+  { label: "Bottom row", keys: [..."zxcvbnm"] },
+];
+
 interface Props {
   entries: QaEntry[];
   open: boolean;
   onAdd: (question: string, answer: string, alternates?: string[]) => Promise<void>;
   onUpdate: (
     id: string,
-    fields: { question?: string; answer?: string; alternates?: string[] },
+    fields: { question?: string; answer?: string; alternates?: string[]; hotkey?: string | null },
   ) => Promise<void>;
   onRemove: (id: string) => Promise<void>;
   onImport: (
@@ -62,6 +75,14 @@ export function QaPanel({ entries, open, onAdd, onUpdate, onRemove, onImport }: 
       return terms.every((term) => haystack.includes(term));
     });
   }, [entries, search]);
+
+  // key -> id of the entry currently holding it, so each dropdown can mark
+  // the keys that are already taken.
+  const hotkeyOwners = useMemo(() => {
+    const owners = new Map<string, string>();
+    for (const e of entries) if (e.hotkey) owners.set(e.hotkey, e.id);
+    return owners;
+  }, [entries]);
 
   async function handleAdd() {
     const question = newQuestion.trim();
@@ -279,23 +300,52 @@ export function QaPanel({ entries, open, onAdd, onUpdate, onRemove, onImport }: 
                     <>
                       <div className="qa-item-head">
                         <span className="qa-question">{entry.question}</span>
-                        <span className="file-actions">
-                          <button
-                            className="icon-btn"
-                            title="Edit"
-                            onClick={() => startEdit(entry)}
+                        <span className="qa-item-controls">
+                          <select
+                            className="hotkey-select"
+                            value={entry.hotkey ?? ""}
                             disabled={busyId === entry.id}
+                            title="Quick-recall key — press this key (outside any text field) to instantly show this answer on screen, even if voice or typing isn't working. Assigning a key takes it from whichever entry currently has it."
+                            onChange={(e) =>
+                              void onUpdate(entry.id, { hotkey: e.target.value || null })
+                            }
                           >
-                            [edit]
-                          </button>
-                          <button
-                            className="icon-btn danger"
-                            title="Delete"
-                            onClick={() => void handleDelete(entry.id)}
-                            disabled={busyId === entry.id}
-                          >
-                            [del]
-                          </button>
+                            <option value="">Quick key: none</option>
+                            {HOTKEY_ROWS.map((row) => (
+                              <optgroup key={row.label} label={row.label}>
+                                {row.keys.map((key) => {
+                                  // Picking a key another entry holds is allowed
+                                  // (it just moves), but with 36 of them it's
+                                  // worth saying which are already spoken for.
+                                  const owner = hotkeyOwners.get(key);
+                                  return (
+                                    <option key={key} value={key}>
+                                      Quick key: {key.toUpperCase()}
+                                      {owner && owner !== entry.id ? " (in use)" : ""}
+                                    </option>
+                                  );
+                                })}
+                              </optgroup>
+                            ))}
+                          </select>
+                          <span className="file-actions">
+                            <button
+                              className="icon-btn"
+                              title="Edit"
+                              onClick={() => startEdit(entry)}
+                              disabled={busyId === entry.id}
+                            >
+                              [edit]
+                            </button>
+                            <button
+                              className="icon-btn danger"
+                              title="Delete"
+                              onClick={() => void handleDelete(entry.id)}
+                              disabled={busyId === entry.id}
+                            >
+                              [del]
+                            </button>
+                          </span>
                         </span>
                       </div>
                       <p className="qa-answer">{entry.answer}</p>
