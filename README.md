@@ -18,7 +18,7 @@ backend that holds your API key.
 ## How it works
 
 ```
-Browser mic ──► Web Speech API (live transcript) ──► joins the record, verbatim
+Microphone ──► whisper.cpp, on this machine ──► joins the record, verbatim
                                                             ▲
 Ask mode (❓) or a typed question ─────────────────────────┘
                       │
@@ -36,7 +36,11 @@ Ask mode (❓) or a typed question ───────────────
                     Nothing free could answer it — say so
 ```
 
-- **Speech-to-text** uses the browser's built-in Web Speech API — no audio keys, works in Chrome/Edge. It **auto-detects English vs. Filipino/Tagalog** ([`src/lib/detectLang.ts`](src/lib/detectLang.ts)): after each utterance it checks for common Tagalog words and switches the recognizer language for the *next* one if needed — no manual toggle. The **`[EN]`/`[FIL]`** badge in the command bar just shows which one is currently active. (The Web Speech API can only listen in one language at a time, so this adapts going forward rather than detecting both simultaneously — it can't un-garble an utterance recognized in the wrong language after the fact.)
+- **Speech-to-text runs locally**, via [whisper.cpp](https://github.com/ggml-org/whisper.cpp) in the desktop app ([`src/hooks/useSpeechRecognition.ts`](src/hooks/useSpeechRecognition.ts)). **No API key, no per-minute cost, no audio leaves the machine**, and it works offline. It **auto-detects English vs. Filipino/Tagalog** ([`src/lib/detectLang.ts`](src/lib/detectLang.ts)): after each utterance it checks for common Tagalog words and tells Whisper which language to expect for the *next* one — no manual toggle. The **`[EN]`/`[FIL]`** badge in the command bar shows which is currently active.
+  - This replaced the browser's built-in Web Speech API, which **does not work in Electron**: Chrome's implementation calls a Google speech service using private API keys baked into official Chrome builds, so in Electron it fails immediately with a `network` error and there's no flag that enables it.
+  - **Voice input is desktop-only.** whisper.cpp is a native binary the browser can't run, so the web build supports typed questions and saved Q&A but not the microphone. It says so rather than failing silently.
+  - **There's no word-by-word interim text.** Whisper transcribes a *finished* utterance rather than a live stream, so the console shows a `…` indicator while you're speaking and the text lands when you stop. [`src/lib/mic.ts`](src/lib/mic.ts) decides where an utterance ends, using an energy gate: it collects audio while you're above an adaptive noise floor and flushes ~700ms after you go quiet.
+  - **Silence is never transcribed.** Whisper doesn't return "nothing" for audio with no speech in it — it invents the most common thing from its training data, which is why an idle mic used to fill the log with "Thank you." and "Thanks for watching!". Three things prevent it: the mic only sends a segment containing at least 400ms of genuinely voiced audio; the engine is left free to emit its `[BLANK_AUDIO]` marker (passing `--suppress-nst` actively *causes* hallucinations, by forcing a real word out instead of the marker); and any transcript that comes back as a known artifact is dropped in [`electron/whisper.cjs`](electron/whisper.cjs).
 - **Plain listening (▶) never guesses.** Everything heard is transcribed as-is, including misheard/garbled fragments — there's no "does this sound like a question" heuristic trying (and sometimes failing) to decide what to answer. **Ask mode (❓)** is the explicit, reliable way to get a spoken question answered — see [Using it](#using-it) below.
 - **Language**: questions can be asked in English, Filipino/Tagalog, or a Taglish mix — Claude understands either and answers in English by default (see [`server/prompts.js`](server/prompts.js)).
 - The backend holds your API key so it's never exposed to the browser.
@@ -68,7 +72,13 @@ modules with the web layer kept separate from business logic.
 │       ├── qa.controller.js
 │       └── ask.controller.js
 │
-├── scripts/dev.mjs        Dev launcher (backend + Vite, with o/q shortcuts)
+├── electron/              Desktop shell
+│   ├── main.cjs           Main process: window, embedded Express server, mic permissions
+│   ├── whisper.cjs        Runs whisper.cpp locally and turns audio into text
+│   └── preload.cjs        contextBridge surface exposed to the renderer
+├── scripts/
+│   ├── dev.mjs            Dev launcher (backend + Vite [+ Electron], with o/q shortcuts)
+│   └── fetch-whisper.mjs  Downloads the whisper.cpp runtime + model into vendor/
 ├── index.html             Vite entry
 ├── vite.config.ts         Dev server + /api proxy to the backend
 ├── src/                   React frontend
@@ -78,9 +88,9 @@ modules with the web layer kept separate from business logic.
 │   │   ├── Console.tsx        Question/Answer + scrollback log (notes + Q&A) + command bar
 │   │   └── QaPanel.tsx        Collapsible drawer: search/add/edit/delete/import saved Q&A pairs
 │   ├── hooks/
-│   │   ├── useSpeechRecognition.ts   Web Speech API wrapper
+│   │   ├── useSpeechRecognition.ts   Mic + local Whisper transcription
 │   │   └── useQa.ts                  Saved Q&A list + add/update/remove/import state
-│   └── lib/               api.ts (backend client), qaMatch.ts (keyword-coverage saved-Q&A matching), qaImport.ts (.csv/.json parsing), dedupe.ts (near-duplicate detection), transcript.ts (build/download record, whole or Q&A-only)
+│   └── lib/               api.ts (backend client), mic.ts (mic capture + utterance detection), qaMatch.ts (keyword-coverage saved-Q&A matching), qaImport.ts (.csv/.json parsing), dedupe.ts (near-duplicate detection), transcript.ts (build/download record, whole or Q&A-only)
 ├── samples/               qa-import-sample.csv / .json — try the bulk import with these
 └── .env                   ANTHROPIC_API_KEY + SUPABASE_* (git-ignored)
 ```
@@ -91,9 +101,9 @@ the controllers, so each piece is isolated and testable.
 
 ## Setup
 
-Requires **Node.js 18.11+**. Typed questions work in any browser; voice input
-needs a **Chromium browser** (Chrome or Edge — the Web Speech API isn't
-available in Firefox).
+Requires **Node.js 18.11+**. Typed questions work everywhere; voice input needs
+a microphone and the **desktop app** (see [Desktop app](#desktop-app-electron)),
+because speech recognition runs locally rather than in the browser.
 
 ```bash
 # 1. Install dependencies
@@ -104,10 +114,153 @@ cp .env.example .env
 #   then edit .env:
 #   - ANTHROPIC_API_KEY (get one at https://console.anthropic.com/settings/keys)
 #   - VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY (Project Settings > API)
+#   (speech-to-text needs no key — it runs locally)
 
 # 3. Run in development (backend + Vite dev server together)
 npm run dev
+
+# ...or run it as a desktop app, with voice input
+npm run whisper:setup   # one-time, ~150MB download
+npm run dev:desktop
 ```
+
+## Desktop app (Electron)
+
+The same React frontend and Express backend, wrapped in a native window — and
+the only build with voice input.
+
+```bash
+npm run whisper:setup  # one-time: downloads the speech engine + model
+npm run dev:desktop    # dev: Vite + backend + Electron, with hot reload
+npm run desktop:pack   # build an unpacked app into release/win-unpacked/
+npm run desktop:dist   # build a real installer into release/
+```
+
+`desktop:dist` produces an NSIS installer on Windows, a `.dmg` on macOS, and
+an AppImage on Linux — each built on its own platform.
+
+### Installing it
+
+`npm run desktop:dist` writes **`release/Voice Doc Assistant Setup <version>.exe`**
+(~223MB — most of that is the bundled Whisper model). Run it to install.
+
+- It installs **per-user**, into `%LOCALAPPDATA%\Programs\Voice Doc Assistant`,
+  so it needs no administrator rights and you can pick a different folder.
+- **Windows will warn you the publisher is unknown.** The build isn't code-signed —
+  click *More info → Run anyway*. Silencing that for real means buying a code-signing
+  certificate; nothing in the app can avoid it.
+- **Voice input works immediately** — the speech engine and model ship inside the
+  installer, so there's no `whisper:setup` step on the installed copy.
+- **Add your keys after installing**, at **`%APPDATA%\voice-doc-assistant\.env`**.
+  The installed app can't see the repo's `.env`. Use that path rather than the
+  install directory — the installer clears the install directory on upgrade, so
+  a `.env` kept beside the `.exe` is destroyed every time you reinstall. The
+  file should contain `ANTHROPIC_API_KEY` and your
+  `VITE_SUPABASE_*` values. Without it the app still runs — voice, transcription
+  and typed input all work; only Claude answers and saved Q&A sync are missing.
+
+### The window
+
+The desktop window is **frameless and transparent** ([`electron/main.cjs`](electron/main.cjs)),
+so the app's own title bar is the real one: drag it to move the window, and its
+`–` / `□` / `×` buttons are wired to actual window controls. That also removes
+the duplicate chrome you'd otherwise get — a native title bar and menu sitting
+above the app's own.
+
+The three themes (**Dark / Light / Glass**, cycled from the title-bar button)
+are all glass; they differ in tint and backdrop. **Glass** drops the page
+background entirely so the desktop shows through the window.
+
+On Windows 11 the window also sets `backgroundMaterial: "acrylic"`, which is
+what actually frosts the desktop behind it. CSS `backdrop-filter` can't do
+that — it only blurs content the page itself painted — so without acrylic the
+Glass theme would be a plain dim overlay rather than frosted glass.
+
+### Speech-to-text setup
+
+`npm run whisper:setup` downloads two things into `vendor/whisper/` (git-ignored,
+~150MB total): the prebuilt whisper.cpp binaries and a GGML model. It's safe to
+re-run — anything already downloaded is skipped.
+
+Pick a different model if the default doesn't suit you:
+
+```bash
+npm run whisper:setup -- tiny    #  75MB — fastest, least accurate
+npm run whisper:setup -- base    # 142MB — the default
+npm run whisper:setup -- small   # 466MB — slowest, best Filipino accuracy
+```
+
+Whisper's Tagalog is weakest at the small end, so `small` is worth the download
+if you use Filipino heavily. Only one model needs to be present; the app picks
+up whichever it finds.
+
+**Speed.** A 4-second question transcribes in about **1 second** on a Ryzen 5
+3500U (4 cores / 8 threads). Three things get it there, and they matter more
+than the model choice:
+
+- The model is loaded **once** and kept resident via `whisper-server`. Shelling
+  out to `whisper-cli` per utterance would re-read ~150MB every time (~1.5s).
+- **`--audio-ctx 512`.** Whisper's encoder always runs over a 30-second window
+  regardless of clip length, so a 4-second question pays for 26 seconds of
+  silence. Limiting the context to ~10s of frames measured **3028ms → 1094ms,
+  a 2.8× speedup with identical output**. The catch is that audio past ~10s
+  isn't transcribed at all, which is why [`src/lib/mic.ts`](src/lib/mic.ts)
+  caps an utterance at 9s — exceed the window and the end of a long question
+  silently disappears (and the text starts repeating itself).
+- **All cores.** Halving the thread count roughly doubled the time.
+
+`tiny` is not a useful speed option — measured *slower* than `base` here and
+returned nothing at all for the same clip. If accuracy is the problem rather
+than speed (Filipino especially), `npm run whisper:setup -- small` is the lever
+to pull; expect roughly 2-3× the latency above.
+
+**Prebuilt binaries exist for Windows and Linux x64.** On macOS, build
+whisper.cpp from source and drop `whisper-server` plus its libraries into
+`vendor/whisper/bin/`; the script will tell you this if you run it there.
+
+### Why the runtime lives outside the asar
+
+Packaged builds put the whisper files in `resources/whisper/` via
+`extraResources` rather than bundling them into `app.asar`. An asar is an
+archive, and the OS can't execute a binary from inside one — `whisper-server`
+has to exist as a real file on disk to be spawned. This also adds ~150MB to the
+installer, which is the price of not having a cloud bill.
+
+**How it's wired.** [`electron/main.cjs`](electron/main.cjs) starts the *same*
+Express app in-process, bound to `127.0.0.1` on a random free port, and points
+the window at that URL rather than loading the files over `file://`. That way
+every relative `/api/...` call in [`src/lib/api.ts`](src/lib/api.ts) — including
+the SSE answer stream — works unchanged, and the page still counts as a secure
+context so the microphone is available. The loopback bind also means the API
+(and the Anthropic key behind it) is never reachable from the local network,
+which the plain `npm start` server does not guarantee.
+
+**Keys in a packaged build.** The installed app can't read the repo's `.env`,
+so it looks for one in this order and takes the first it finds:
+
+1. next to the installed `.exe` — checked first so it can override, but **not
+   where you should keep it**: the NSIS installer clears the install directory
+   on upgrade, so a `.env` here is destroyed every time you reinstall
+2. **the app's `userData` folder — `%APPDATA%\voice-doc-assistant\.env` on
+   Windows. This is the one to use**: it lives outside the install directory
+   and survives upgrades. Note the lower-case, hyphenated name — Electron
+   derives it from package.json's `name`, not the `productName` used for the
+   install folder.
+3. a `.env` bundled with the build
+
+The app logs every path it searched when it can't find a key, and the in-app
+error names the `userData` path.
+
+Real environment variables always win over all of these. Without a key the app
+still opens — Q&A and typed input work, and the UI says what's missing.
+
+**Note on ESM.** [`electron/main.cjs`](electron/main.cjs) and
+[`electron/preload.cjs`](electron/preload.cjs) are CommonJS even though the rest
+of the project is `"type": "module"`. Electron injects its built-in `electron`
+module by patching CommonJS `require()`; it doesn't intercept ESM resolution, so
+`import { app } from "electron"` resolves to the *npm package* in
+`node_modules` — which exports the path to the binary, not the API — and fails
+with `app is undefined`. `require()` always gets the real module.
 
 ### Supabase setup
 
@@ -322,8 +475,9 @@ counterpart doesn't pay.
   itself — its job is "worth keeping in mind," not "is this the same
   question" — and it costs nothing extra when nothing related is found,
   which is the common case for general-knowledge questions.
-- Chrome needs an internet connection for speech recognition, and requires
-  **HTTPS** for the mic on any real domain (`localhost` is exempt).
+- Speech recognition needs **no internet connection** — Whisper runs on this
+  machine, so voice input keeps working offline (Claude still needs the
+  network, but saved Q&A answers don't).
 
 ## Managing API cost
 

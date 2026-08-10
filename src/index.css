@@ -1,80 +1,169 @@
+/* ============================================================
+   Glassmorphism design tokens
+   ------------------------------------------------------------
+   Every surface is a translucent pane over a blurred backdrop:
+   a tinted fill, a bright hairline stroke to catch the "edge"
+   of the glass, and a soft drop shadow to lift it off the
+   background. The three themes change the tint and the backdrop,
+   not the material.
+
+   In the desktop app the window itself is transparent (see
+   electron/main.cjs), so the "Glass" theme frosts the actual
+   desktop behind it. CSS backdrop-filter alone can't do that —
+   it only blurs what the page itself painted.
+   ============================================================ */
 :root {
-  --bg: #0c0c0c;
-  --panel: #0c0c0c;
-  --panel-2: #161616;
-  --titlebar: #1f1f1f;
-  --well: #000000;
-  --desktop: #000000;
-  --border: #3a3a3a;
-  --border-bright: #5a5a5a;
-  --text: #cccccc;
-  --bright: #f2f2f2;
-  --muted: #7a7a7a;
-  --green: #16c60c;
-  --cyan: #61d6d6;
-  --yellow: #f9f1a5;
-  --red: #e74856;
+  /* --- User-adjustable appearance (see src/hooks/useAppearance.ts) ---
+     Every translucent surface multiplies its own alpha by --ui-opacity, and
+     the text colours multiply theirs by --text-opacity, so one slider each
+     retunes the whole window without any theme needing to know about it.
+     1 is the designed look; above 1 goes more solid, below 1 more see-through. */
+  --ui-opacity: 1;
+  --text-opacity: 1;
+
+  /* The colour channels behind every surface and every piece of body text,
+     as bare "r g b" triples so the alphas below can be applied to them.
+     Each theme sets its own defaults; picking a colour in Settings overrides
+     these on the root element, which is why one choice retints the whole
+     window and survives a theme switch. */
+  --surface-rgb: 18 20 28;
+  --text-rgb: 255 255 255;
+
+  /* Tells the browser to draw OS-rendered widgets — dropdown lists,
+     scrollbars, form controls — in the matching mode, instead of defaulting
+     to a light palette under a dark app. */
+  color-scheme: dark;
+
+  /* Material */
+  --radius-sm: 7px;
+  --radius: 11px;
+  --radius-lg: 18px;
+  --blur: 20px;
+  --stroke: rgba(255, 255, 255, 0.1);
+  --stroke-bright: rgba(255, 255, 255, 0.2);
+  /* Tinted fills for controls. These have to be theme-aware: a white wash
+     is invisible on a light backdrop, which is what made inputs look
+     borderless in light mode. */
+  --fill-subtle: rgba(255, 255, 255, 0.03);
+  --fill: rgba(255, 255, 255, 0.06);
+  --fill-strong: rgba(255, 255, 255, 0.16);
+  /* For panels that float *over* other content. The in-flow surfaces can be
+     translucent because there's only a backdrop behind them; an overlay has
+     scrolling text underneath and has to stay readable. */
+  --overlay: rgb(var(--surface-rgb) / 0.96);
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 24px 70px rgba(0, 0, 0, 0.55);
+  --sheen: linear-gradient(
+    160deg,
+    rgba(255, 255, 255, 0.08) 0%,
+    rgba(255, 255, 255, 0.02) 38%,
+    rgba(255, 255, 255, 0) 65%
+  );
+
+  /* Dark glass (default). Every surface is the same colour at a different
+     alpha — that's what keeps the hierarchy intact when the colour is
+     swapped for a custom one. */
+  --bg: rgb(var(--surface-rgb) / calc(0.55 * var(--ui-opacity)));
+  --panel: rgb(var(--surface-rgb) / calc(0.42 * var(--ui-opacity)));
+  --panel-2: rgb(var(--surface-rgb) / calc(0.62 * var(--ui-opacity)));
+  --titlebar: rgb(var(--surface-rgb) / calc(0.66 * var(--ui-opacity)));
+  --well: rgb(var(--surface-rgb) / calc(0.38 * var(--ui-opacity)));
+  --desktop: #070810;
+  --border: rgba(255, 255, 255, 0.1);
+  --border-bright: rgba(255, 255, 255, 0.22);
+  /* Pure white body text by default. A tinted near-white reads as grey
+     against a dark glass panel, which is exactly what it looked like. */
+  --text: rgb(var(--text-rgb) / var(--text-opacity));
+  --bright: rgb(var(--text-rgb) / var(--text-opacity));
+  --muted: rgb(var(--text-rgb) / calc(var(--text-opacity) * 0.62));
+  --green: #3ddc84;
+  --cyan: #5ed8e8;
+  --yellow: #ffd479;
+  --red: #ff6b7f;
   --accent: var(--green);
 }
 
-/* ---------- Light mode ---------- */
+/* The backdrop the glass sits on. Two soft colour pools give the panes
+   something to actually refract, which is what sells the effect. */
+body {
+  background:
+    radial-gradient(circle at 15% 12%, rgba(61, 220, 132, 0.16), transparent 42%),
+    radial-gradient(circle at 88% 78%, rgba(94, 216, 232, 0.14), transparent 46%),
+    radial-gradient(circle at 60% 40%, rgba(120, 110, 255, 0.1), transparent 55%),
+    var(--desktop);
+  background-attachment: fixed;
+}
+
+/* ---------- Light glass ---------- */
 :root[data-theme="light"] {
-  --bg: #f4f3ee;
-  --panel: #fbfbf8;
-  --panel-2: #e9e8e1;
-  --titlebar: #ded9c9;
-  --well: #ffffff;
-  --desktop: #cfcabc;
-  --border: #b8b3a2;
-  --border-bright: #8f8a78;
-  --text: #2b2b26;
-  --bright: #000000;
-  --muted: #6b6659;
-  --green: #147a12;
-  --cyan: #0d7a7a;
-  --yellow: #8a6a00;
-  --red: #b0293a;
-  --accent: var(--green);
-}
+  /* Dark hairlines, not white ones — the glossy edge comes from --sheen. */
+  --stroke: rgba(31, 41, 74, 0.14);
+  --stroke-bright: rgba(31, 41, 74, 0.28);
+  --fill-subtle: rgba(31, 41, 74, 0.03);
+  --fill: rgba(31, 41, 74, 0.06);
+  --fill-strong: rgba(31, 41, 74, 0.14);
+  --overlay: rgb(var(--surface-rgb) / 0.97);
+  --shadow: 0 10px 30px rgba(31, 41, 74, 0.12);
+  --shadow-lg: 0 24px 70px rgba(31, 41, 74, 0.18);
+  --sheen: linear-gradient(
+    160deg,
+    rgba(255, 255, 255, 0.7) 0%,
+    rgba(255, 255, 255, 0.25) 38%,
+    rgba(255, 255, 255, 0) 65%
+  );
 
-/* ---------- Transparent (glass) mode ---------- */
-/* Same dark palette, but every panel background is translucent and blurred
-   — see the .glass-surface rule below — so the window reads as frosted
-   glass over the glow behind it instead of a flat color swap. */
-:root[data-theme="transparent"] {
-  --bg: rgba(12, 12, 12, 0.5);
-  --panel: rgba(12, 12, 12, 0.4);
-  --panel-2: rgba(24, 24, 24, 0.45);
-  --titlebar: rgba(31, 31, 31, 0.5);
-  --well: rgba(0, 0, 0, 0.5);
-  --desktop: #0c0c0c;
-  --border: rgba(90, 90, 90, 0.4);
-  --border-bright: rgba(130, 130, 130, 0.55);
-  --text: #d9d9d9;
-  --bright: #ffffff;
-  --muted: #a8a8a8;
-  --green: #2be820;
-  --cyan: #7ee6e6;
-  --yellow: #f9f1a5;
-  --red: #ff5b6b;
-  --accent: var(--green);
+  --surface-rgb: 255 255 255;
+  --text-rgb: 32 39 56;
+  color-scheme: light;
+
+  --bg: rgb(var(--surface-rgb) / calc(0.6 * var(--ui-opacity)));
+  --panel: rgb(var(--surface-rgb) / calc(0.48 * var(--ui-opacity)));
+  --panel-2: rgb(var(--surface-rgb) / calc(0.62 * var(--ui-opacity)));
+  --titlebar: rgb(var(--surface-rgb) / calc(0.66 * var(--ui-opacity)));
+  --well: rgb(var(--surface-rgb) / calc(0.72 * var(--ui-opacity)));
+  --desktop: #e8ecf6;
+  --border: rgba(31, 41, 74, 0.12);
+  --border-bright: rgba(31, 41, 74, 0.24);
+  --text: rgb(var(--text-rgb) / var(--text-opacity));
+  --bright: rgb(var(--text-rgb) / var(--text-opacity));
+  --muted: rgb(var(--text-rgb) / calc(var(--text-opacity) * 0.62));
+  --green: #0f9d58;
+  --cyan: #0b7f96;
+  --yellow: #9a6b00;
+  --red: #d32f4b;
 }
-:root[data-theme="transparent"] body {
-  background: radial-gradient(circle at 18% 15%, rgba(43, 232, 32, 0.22), transparent 40%),
-    radial-gradient(circle at 85% 80%, rgba(126, 230, 230, 0.18), transparent 45%),
+:root[data-theme="light"] body {
+  background:
+    radial-gradient(circle at 15% 12%, rgba(15, 157, 88, 0.16), transparent 42%),
+    radial-gradient(circle at 88% 78%, rgba(11, 127, 150, 0.14), transparent 46%),
+    radial-gradient(circle at 60% 40%, rgba(120, 110, 255, 0.12), transparent 55%),
     var(--desktop);
 }
-/* Frost every translucent surface so text stays legible over the glow. */
-:root[data-theme="transparent"] .term-app,
-:root[data-theme="transparent"] .title-bar,
-:root[data-theme="transparent"] .panel-head,
-:root[data-theme="transparent"] .command-bar,
-:root[data-theme="transparent"] .mini-box,
-:root[data-theme="transparent"] .cmd-input,
-:root[data-theme="transparent"] .edit-input,
-:root[data-theme="transparent"] .filelist-panel.open {
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+
+/* ---------- Clear glass ---------- */
+/* Backdrop drops away entirely so the desktop shows through the window.
+   Panes get a touch more tint to keep text readable over whatever happens
+   to be behind them. */
+:root[data-theme="transparent"] {
+  --bg: rgb(var(--surface-rgb) / calc(0.4 * var(--ui-opacity)));
+  --panel: rgb(var(--surface-rgb) / calc(0.3 * var(--ui-opacity)));
+  --panel-2: rgb(var(--surface-rgb) / calc(0.46 * var(--ui-opacity)));
+  --titlebar: rgb(var(--surface-rgb) / calc(0.5 * var(--ui-opacity)));
+  --well: rgb(var(--surface-rgb) / calc(0.3 * var(--ui-opacity)));
+  --text: rgb(var(--text-rgb) / var(--text-opacity));
+  --bright: rgb(var(--text-rgb) / var(--text-opacity));
+  --muted: rgb(var(--text-rgb) / calc(var(--text-opacity) * 0.7));
+  --shadow-lg: 0 24px 70px rgba(0, 0, 0, 0.5);
+}
+:root[data-theme="transparent"] body {
+  background: transparent;
+}
+/* The title bar sits on bare glass with no panel behind it, so its text lands
+   straight on top of whatever is on the desktop. A soft shadow keeps it
+   legible over a light wallpaper without muddying the effect the way an
+   opaque strip would. */
+:root[data-theme="transparent"] .title-bar {
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
 }
 
 * {
@@ -96,14 +185,19 @@
   height: 10px;
 }
 *::-webkit-scrollbar-track {
-  background: var(--panel-2);
+  background: transparent;
 }
 *::-webkit-scrollbar-thumb {
   background: var(--border-bright);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
 }
 
 html {
   overflow-x: hidden;
+  height: 100%;
 }
 body {
   margin: 0;
@@ -111,19 +205,98 @@ body {
   font-family: "Cascadia Mono", "Cascadia Code", Consolas, "Lucida Console",
     "Courier New", monospace;
   font-size: 14px;
-  background: var(--desktop);
   color: var(--text);
   line-height: 1.55;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: color 0.2s ease;
 }
 
-/* ---------- Fake console window chrome ---------- */
+/* ---------- The main glass pane ---------- */
 .term-app {
   max-width: 1200px;
   margin: 1.5rem auto;
-  border: 1px solid var(--border-bright);
-  background: var(--bg);
-  box-shadow: 0 0 0 1px #000, 0 12px 40px rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-lg);
+  background-color: var(--bg);
+  background-image: var(--sheen);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(var(--blur)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(160%);
+  /* Keeps the children's square corners from poking out of the rounded pane. */
+  overflow: hidden;
+}
+
+/* ---------- Desktop shell: fill the window ---------- */
+/* In a native window the page *is* the app, so the centred max-width column
+   and its margin are just a band of dead space around the edge. The window
+   already provides the frame, the rounded corners and the shadow. */
+:root[data-desktop] body {
+  height: 100%;
+}
+:root[data-desktop] #root {
+  height: 100%;
+}
+:root[data-desktop] .term-app {
+  max-width: none;
+  margin: 0;
+  height: 100%;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  /* Lets the workspace take every pixel left over after the title bar, at any
+     window size, instead of a fixed viewport fraction. */
+  display: flex;
+  flex-direction: column;
+}
+:root[data-desktop] .workspace {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  margin: 0.75rem;
+}
+:root[data-desktop] .unsupported {
+  margin: 0 0.75rem 0.75rem;
+}
+/* The desktop shell is a fixed-height flex column, so every part of it has to
+   be allowed to shrink. The min-heights below are written for a scrolling web
+   page; left in place they push the command bar off the bottom of a small
+   window — the input simply isn't there any more. */
+:root[data-desktop] .console-body,
+:root[data-desktop] .scrollback,
+:root[data-desktop] .console-panel {
+  min-height: 0;
+}
+/* Squeeze the chrome a little when there's very little height to work with,
+   so what's left goes to the transcript. */
+/* The path in the title bar is decoration; the buttons beside it are not. Give
+   it up before it collides with them. */
+/* :root only to out-weigh the base .title-bar .title-text rule, which is
+   defined further down the file at the same specificity and would otherwise
+   win on source order alone. */
+@media (max-width: 560px) {
+  :root .title-bar .title-text {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    margin-right: 0.5rem;
+  }
+}
+@media (max-width: 440px) {
+  :root .title-bar .title-text {
+    display: none;
+  }
+}
+
+@media (max-height: 560px) {
+  :root[data-desktop] .workspace {
+    margin: 0.4rem;
+  }
+  :root[data-desktop] .panel-head,
+  :root[data-desktop] .command-bar {
+    padding-top: 0.4rem;
+    padding-bottom: 0.4rem;
+  }
 }
 
 .title-bar {
@@ -131,25 +304,167 @@ body {
   align-items: center;
   justify-content: space-between;
   background: var(--titlebar);
-  border-bottom: 1px solid var(--border);
-  padding: 0.35rem 0.5rem 0.35rem 0.7rem;
+  border-bottom: 1px solid var(--stroke);
+  padding: 0.45rem 0.55rem 0.45rem 0.85rem;
   user-select: none;
+  /* Frameless window: this bar is what the user drags to move it. */
+  -webkit-app-region: drag;
+}
+/* Anything clickable has to opt out of the drag region or it can't be
+   clicked at all. */
+.title-bar button,
+.title-bar .theme-toggle,
+.win-controls {
+  -webkit-app-region: no-drag;
 }
 .theme-toggle {
-  background: transparent;
-  border: 1px solid var(--border);
+  background: var(--fill);
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
   color: var(--muted);
   cursor: pointer;
   font: inherit;
   font-size: 0.75rem;
-  padding: 0.15rem 0.45rem;
-  margin-right: 0.4rem;
+  padding: 0.2rem 0.7rem;
+  margin-right: 0.5rem;
   white-space: nowrap;
+  transition: color 0.15s ease, background-color 0.15s ease,
+    border-color 0.15s ease;
 }
 .theme-toggle:hover {
   color: var(--bright);
-  border-color: var(--border-bright);
+  background: var(--fill-strong);
+  border-color: var(--stroke-bright);
 }
+/* ---------- Appearance settings popover ---------- */
+/* Anchored to the title bar, which is position: relative for this. Uses
+   --overlay rather than a panel colour: it floats above the console, and it
+   would be self-defeating for the panel that adjusts transparency to become
+   unreadable at low settings. */
+.settings-panel {
+  position: fixed;
+  top: 46px;
+  right: 14px;
+  z-index: 20;
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 0.9rem;
+  background: var(--overlay);
+  border: 1px solid var(--stroke-bright);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(var(--blur)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(160%);
+  text-shadow: none;
+  -webkit-app-region: no-drag;
+  cursor: default;
+}
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--bright);
+}
+.settings-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.settings-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--text);
+}
+.settings-value {
+  color: var(--green);
+  font-size: 0.72rem;
+}
+.settings-hint,
+.settings-note {
+  font-size: 0.68rem;
+  color: var(--muted);
+  line-height: 1.4;
+  margin: 0;
+}
+.settings-panel input[type="range"] {
+  width: 100%;
+  accent-color: var(--green);
+  cursor: pointer;
+}
+.settings-panel .link-btn {
+  align-self: flex-start;
+}
+.settings-colors {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.settings-color {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  color: var(--text);
+  cursor: pointer;
+}
+/* Native colour inputs come with a chunky bevelled frame; strip it back to a
+   plain swatch that matches the rest of the panel. */
+.settings-color input[type="color"] {
+  width: 30px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--stroke-bright);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+.settings-color input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+.settings-color input[type="color"]::-webkit-color-swatch {
+  border: none;
+  border-radius: 4px;
+}
+.settings-colors .link-btn {
+  font-size: 0.68rem;
+  padding: 0.15rem 0.45rem;
+}
+
+.settings-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+.settings-toggle input {
+  margin-top: 0.15rem;
+  accent-color: var(--green);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.settings-toggle > span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+/* Icon-only so it fits beside the theme toggle — two text buttons overflowed
+   the title bar and overlapped each other. */
+.settings-btn {
+  padding: 0.2rem 0.5rem;
+  margin-right: 0.35rem;
+}
+.settings-btn.on {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 55%, transparent);
+  background: color-mix(in srgb, var(--green) 16%, transparent);
+}
+
 .title-bar .title-text {
   display: flex;
   align-items: center;
@@ -162,53 +477,34 @@ body {
 }
 .win-controls {
   display: flex;
-  gap: 2px;
+  align-items: center;
+  gap: 4px;
 }
-.win-controls span {
+.win-controls button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 22px;
-  font-size: 0.75rem;
+  width: 30px;
+  height: 24px;
+  padding: 0;
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1;
   color: var(--muted);
+  background: transparent;
   border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
-.win-controls span.close:hover {
+.win-controls button.close:hover {
   background: var(--red);
   color: #fff;
 }
-.win-controls span.min:hover,
-.win-controls span.max:hover {
-  background: var(--border);
+.win-controls button.min:hover,
+.win-controls button.max:hover {
+  background: var(--fill-strong);
   color: var(--bright);
-}
-
-header {
-  padding: 1rem 1.25rem 0.25rem;
-  border-bottom: 1px dashed var(--border);
-}
-header h1 {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 700;
-  color: var(--green);
-  letter-spacing: 0.02em;
-}
-header h1 .caret {
-  display: inline-block;
-  width: 0.55em;
-  background: var(--green);
-  animation: blink 1s steps(2) infinite;
-  margin-left: 0.15em;
-}
-.tagline {
-  color: var(--muted);
-  margin: 0.4rem 0 0.9rem;
-}
-.tagline::before {
-  content: "REM ";
-  color: var(--border-bright);
 }
 
 /* ---------- Workspace: console + collapsible file-list drawer ---------- */
@@ -220,11 +516,15 @@ header h1 .caret {
   min-height: 460px;
   max-height: 720px;
   margin: 1.1rem;
-  border: 1px solid var(--border);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  overflow: hidden;
 }
 
 .panel {
-  background: var(--panel);
+  background: transparent;
   border: none;
   padding: 0;
   display: flex;
@@ -238,10 +538,12 @@ header h1 .caret {
   align-items: center;
   justify-content: space-between;
   gap: 0.6rem;
-  padding: 0.55rem 0.8rem;
+  padding: 0.6rem 0.85rem;
   background: var(--panel-2);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--stroke);
   flex-shrink: 0;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 .panel-head h2 {
   margin: 0;
@@ -269,22 +571,33 @@ header h1 .caret {
 }
 
 .link-btn {
-  background: none;
-  border: 1px solid var(--border);
+  background: var(--fill-subtle);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
   color: var(--muted);
   cursor: pointer;
   font: inherit;
   font-size: 0.78rem;
-  padding: 0.2rem 0.55rem;
+  padding: 0.25rem 0.65rem;
   white-space: nowrap;
+  transition: color 0.15s ease, border-color 0.15s ease,
+    background-color 0.15s ease;
 }
 .link-btn:hover {
   color: var(--red);
   border-color: var(--red);
+  background: rgba(255, 107, 127, 0.12);
 }
 .link-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+/* A destructive action that's one click from happening should look like it. */
+.link-btn.danger-armed,
+.link-btn.danger-armed:hover {
+  color: #fff;
+  background: var(--red);
+  border-color: var(--red);
 }
 .link-btn:disabled:hover {
   color: var(--muted);
@@ -293,43 +606,61 @@ header h1 .caret {
 
 /* ---------- Terminal-style buttons ---------- */
 .term-btn {
-  background: transparent;
-  border: 1px solid var(--border-bright);
+  background: var(--fill);
+  border: 1px solid var(--stroke-bright);
+  border-radius: var(--radius-sm);
   color: var(--bright);
   font: inherit;
   font-size: 0.8rem;
-  padding: 0.25rem 0.6rem;
+  padding: 0.3rem 0.7rem;
   cursor: pointer;
   white-space: nowrap;
+  transition: background-color 0.15s ease, border-color 0.15s ease,
+    color 0.15s ease, transform 0.1s ease;
 }
-.term-btn:hover {
-  background: var(--text);
-  color: var(--well);
+.term-btn:hover:not(:disabled) {
+  background: var(--fill-strong);
+  border-color: var(--border-bright);
+}
+.term-btn:active:not(:disabled) {
+  transform: translateY(1px);
 }
 .term-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
+.term-btn.active {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 55%, transparent);
+  background: color-mix(in srgb, var(--green) 14%, transparent);
+}
 
 .ai-toggle {
   color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 55%, transparent);
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+}
+.ai-toggle:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--green) 24%, transparent);
   border-color: var(--green);
 }
 .ai-toggle.off {
   color: var(--red);
-  border-color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 55%, transparent);
+  background: color-mix(in srgb, var(--red) 12%, transparent);
 }
-.ai-toggle.off:hover {
-  background: var(--red);
-  color: var(--well);
+.ai-toggle.off:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--red) 24%, transparent);
+  border-color: var(--red);
 }
 
 .src-tag {
   font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  padding: 0.05rem 0.35rem;
+  padding: 0.1rem 0.45rem;
   border: 1px solid var(--border);
+  border-radius: 999px;
   color: var(--muted);
   margin-left: 0.4rem;
   white-space: nowrap;
@@ -382,17 +713,22 @@ header h1 .caret {
 }
 .mini-box {
   background: var(--well);
-  border: 1px solid var(--border);
-  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  padding: 0.55rem 0.7rem;
   min-height: 3.6rem;
   font-size: 0.85rem;
   overflow-y: auto;
   max-height: 8rem;
   white-space: pre-wrap;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 .mini-box.live {
   border-color: var(--cyan);
   color: var(--cyan);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cyan) 18%, transparent);
 }
 .mini-box.pending::after {
   content: "\258B";
@@ -427,8 +763,10 @@ header h1 .caret {
   padding: 0.5rem 0.8rem;
   display: flex;
   gap: 1rem;
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--stroke);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   z-index: 1;
 }
 .tab-btn {
@@ -448,9 +786,41 @@ header h1 .caret {
   color: var(--green);
   border-bottom-color: var(--green);
 }
+/* Each exchange is its own small pane, so a long log reads as a stack of
+   cards rather than one undifferentiated wall of text. */
 .log-entry {
-  border-bottom: 1px dotted var(--border);
-  padding-bottom: 0.7rem;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  background: var(--fill-subtle);
+  padding: 0.7rem 0.8rem;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.log-entry:hover {
+  border-color: var(--border-bright);
+  background: var(--fill);
+}
+
+/* The still-being-spoken entry. Tinted so it reads as provisional — the text
+   can change as Whisper hears more of the sentence. */
+.log-entry.live {
+  border-color: color-mix(in srgb, var(--cyan) 45%, transparent);
+  background: color-mix(in srgb, var(--cyan) 8%, transparent);
+}
+.log-note.live {
+  color: var(--bright);
+}
+.log-note.live::before {
+  content: "» ";
+  color: var(--cyan);
+}
+.type-caret {
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  margin-left: 0.15em;
+  vertical-align: text-bottom;
+  background: var(--cyan);
+  animation: blink 1s steps(2) infinite;
 }
 .log-q {
   margin: 0 0 0.35rem;
@@ -476,7 +846,9 @@ header h1 .caret {
 .log-note {
   margin: 0;
   color: var(--text);
-  opacity: 0.8;
+  /* No opacity knock-down here — it was dimming the transcript to grey even
+     once --text was pure white. The Text slider is the one place that should
+     fade the writing. */
   font-size: 0.85rem;
   white-space: pre-wrap;
 }
@@ -496,28 +868,38 @@ header h1 .caret {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  padding: 0.6rem 0.8rem;
+  padding: 0.7rem 0.85rem;
   background: var(--panel-2);
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--stroke);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .round-btn {
   flex-shrink: 0;
-  width: 2.5rem;
-  height: 2.5rem;
+  width: 2.6rem;
+  height: 2.6rem;
   border-radius: 50%;
-  background: transparent;
+  background: color-mix(in srgb, var(--green) 12%, transparent);
   color: var(--green);
-  border: 1px solid var(--green);
+  border: 1px solid color-mix(in srgb, var(--green) 55%, transparent);
   font-size: 1rem;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: background-color 0.15s ease, color 0.15s ease,
+    border-color 0.15s ease, transform 0.1s ease;
 }
-.round-btn:hover {
+.round-btn:hover:not(:disabled) {
   background: var(--green);
-  color: var(--well);
+  color: #04140b;
+  border-color: var(--green);
+}
+.round-btn:active:not(:disabled) {
+  transform: scale(0.94);
 }
 .round-btn:disabled {
   opacity: 0.4;
@@ -526,21 +908,22 @@ header h1 .caret {
 .round-btn.on {
   color: var(--red);
   border-color: var(--red);
+  background: color-mix(in srgb, var(--red) 16%, transparent);
   animation: pulse 1.4s infinite;
 }
-.round-btn.on:hover {
+.round-btn.on:hover:not(:disabled) {
   background: var(--red);
   color: #fff;
 }
 @keyframes pulse {
   0% {
-    box-shadow: 0 0 0 0 rgba(231, 72, 86, 0.5);
+    box-shadow: 0 0 0 0 rgba(255, 107, 127, 0.5);
   }
   70% {
-    box-shadow: 0 0 0 8px rgba(231, 72, 86, 0);
+    box-shadow: 0 0 0 10px rgba(255, 107, 127, 0);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(231, 72, 86, 0);
+    box-shadow: 0 0 0 0 rgba(255, 107, 127, 0);
   }
 }
 
@@ -549,22 +932,28 @@ header h1 .caret {
    while active, same "recording" cue as everywhere else in the app. */
 .ask-btn {
   color: var(--cyan);
-  border-color: var(--cyan);
+  border-color: color-mix(in srgb, var(--cyan) 55%, transparent);
+  background: color-mix(in srgb, var(--cyan) 12%, transparent);
 }
-.ask-btn:hover {
+.ask-btn:hover:not(:disabled) {
   background: var(--cyan);
-  color: var(--well);
+  color: #04161a;
+  border-color: var(--cyan);
 }
 
 .cmd-input {
   flex: 1;
   min-width: 0;
   background: var(--well);
-  border: 1px solid var(--border-bright);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
   color: var(--bright);
   font: inherit;
   font-size: 0.9rem;
-  padding: 0.5rem 0.7rem;
+  padding: 0.55rem 0.8rem;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .cmd-input::placeholder {
   color: var(--muted);
@@ -572,36 +961,42 @@ header h1 .caret {
 .cmd-input:focus {
   outline: none;
   border-color: var(--green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 20%, transparent);
 }
 
 .square-btn {
   flex-shrink: 0;
-  background: transparent;
-  border: 1px solid var(--border-bright);
+  background: var(--fill);
+  border: 1px solid var(--stroke-bright);
+  border-radius: var(--radius-sm);
   color: var(--bright);
   font: inherit;
   font-size: 0.85rem;
-  padding: 0.55rem 0.6rem;
+  padding: 0.6rem 0.7rem;
   cursor: pointer;
   white-space: nowrap;
+  transition: background-color 0.15s ease, border-color 0.15s ease,
+    color 0.15s ease;
 }
 .square-btn:hover {
-  background: var(--text);
-  color: var(--well);
+  background: var(--fill-strong);
 }
 .square-btn.active {
   border-color: var(--green);
   color: var(--green);
+  background: color-mix(in srgb, var(--green) 14%, transparent);
 }
 
 .lang-badge {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  border: 1px solid var(--border);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  background: var(--fill-subtle);
   color: var(--muted);
   font-size: 0.85rem;
-  padding: 0.55rem 0.6rem;
+  padding: 0.6rem 0.7rem;
   cursor: default;
   user-select: none;
 }
@@ -609,8 +1004,9 @@ header h1 .caret {
 /* Status pill */
 .status {
   font-size: 0.72rem;
-  padding: 0.15rem 0.5rem;
+  padding: 0.2rem 0.6rem;
   border: 1px solid var(--border);
+  border-radius: 999px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   flex-shrink: 0;
@@ -684,14 +1080,18 @@ header h1 .caret {
   flex: 1;
   min-width: 0;
   background: var(--well);
-  border: 1px solid var(--cyan);
+  border: 1px solid color-mix(in srgb, var(--cyan) 50%, transparent);
+  border-radius: var(--radius-sm);
   color: var(--bright);
   font: inherit;
   font-size: 0.85rem;
-  padding: 0.25rem 0.4rem;
+  padding: 0.35rem 0.55rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .edit-input:focus {
   outline: none;
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cyan) 18%, transparent);
 }
 
 /* ---------- Saved Q&A drawer ---------- */
@@ -746,10 +1146,14 @@ textarea.qa-answer-input {
 }
 .qa-item {
   padding: 0.6rem 0.8rem;
-  border-bottom: 1px dotted var(--border);
+  border-bottom: 1px solid var(--stroke);
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
+  transition: background-color 0.15s ease;
+}
+.qa-item:hover {
+  background: var(--fill-subtle);
 }
 .qa-item:last-child {
   border-bottom: none;
@@ -793,6 +1197,21 @@ textarea.qa-answer-input {
      of the row. The open dropdown still shows every label in full. */
   max-width: 8.5rem;
 }
+/* The dropdown list itself is drawn by the OS, not by the page, and it does
+   NOT inherit the app's translucent surfaces — it paints on a solid system
+   background. Options were inheriting the select's colour, which is white
+   here, so the list rendered white-on-white and looked empty apart from
+   whichever row the OS was highlighting.
+   Opaque colours, so the popup is legible whatever the panels are doing. */
+.hotkey-select option,
+.hotkey-select optgroup {
+  background-color: rgb(var(--surface-rgb));
+  color: rgb(var(--text-rgb));
+}
+.hotkey-select optgroup {
+  font-style: normal;
+  opacity: 0.75;
+}
 .hotkey-select:hover {
   color: var(--text);
 }
@@ -822,9 +1241,11 @@ textarea.qa-answer-input {
 .unsupported {
   text-align: center;
   color: var(--red);
-  padding: 0.8rem;
+  padding: 0.7rem 0.9rem;
   margin: 0 1.1rem 1.1rem;
-  border-top: 1px dashed var(--border);
+  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
 }
 
 
@@ -868,13 +1289,10 @@ textarea.qa-answer-input {
     border-left: none;
     border-right: none;
   }
-  header {
-    padding: 0.8rem 0.9rem 0.25rem;
-  }
 
-  /* Title bar: the min/max/close spans (_, □, ×) are decorative only —
-     nothing handles clicks on them — so drop just those rather than fight
-     for space with the functional theme toggle and the long C:\ path.
+  /* Title bar: in the browser the min/max/close buttons do nothing (they only
+     drive a real window in the desktop build), so drop just those rather than
+     fight for space with the functional theme toggle and the long C:\ path.
      (theme-toggle is a sibling <button> inside the same .win-controls
      wrapper, so it must stay untouched.) */
   .title-bar .title-text {
@@ -883,7 +1301,10 @@ textarea.qa-answer-input {
     white-space: nowrap;
     text-overflow: ellipsis;
   }
-  .win-controls span {
+  /* Web build only. In the desktop app the window is frameless, so these
+     ARE the window controls — hiding them at a narrow width would leave no
+     way to minimise or close the window at all. */
+  :root:not([data-desktop]) .win-controls button:not(.theme-toggle) {
     display: none;
   }
 
@@ -912,5 +1333,49 @@ textarea.qa-answer-input {
   .cmd-input {
     order: 1;
     flex-basis: 100%;
+  }
+}
+
+/* ---------- Narrow window: put the conversation first ----------
+   Between ~860px and ~1180px the workspace still laid out as three columns,
+   so the Conversation/Q&A log — the thing you actually read — got whatever
+   width was left over between the question preview and the saved-Q&A drawer.
+   Shrinking the window made the main content the smallest part of it.
+
+   These rules come after the 860px block on purpose: both apply on a small
+   screen, and the later one has to win. */
+@media (max-width: 1180px) {
+  /* The QUESTION/ANSWER preview is the newest scrollback entry shown twice.
+     At this size the duplicate isn't worth a column of its own. */
+  .qa-mini {
+    display: none;
+  }
+}
+
+@media (min-width: 861px) and (max-width: 1180px) {
+  /* Float the drawer over the log rather than taking width from it, so
+     opening the saved Q&A list doesn't squeeze what you're reading. */
+  .workspace {
+    position: relative;
+  }
+  .filelist-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    z-index: 5;
+    border-left: none;
+    transition: width 0.18s ease;
+  }
+  .filelist-panel.open {
+    width: min(340px, 80%);
+    background: var(--overlay);
+    border-left: 1px solid var(--stroke);
+    box-shadow: -14px 0 44px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(var(--blur)) saturate(160%);
+    -webkit-backdrop-filter: blur(var(--blur)) saturate(160%);
+  }
+  .filelist-inner {
+    width: 100%;
   }
 }

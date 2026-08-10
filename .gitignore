@@ -3,5 +3,11 @@ dist/
 .env
 *.log
 
+# Packaged desktop builds (electron-builder output)
+release/
+
+# whisper.cpp binaries + model (~150MB) — run `npm run whisper:setup`
+vendor/
+
 # Local Netlify folder
 .netlify

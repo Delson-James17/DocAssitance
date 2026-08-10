@@ -26,7 +26,10 @@ export function createApp({
   qaStore = createQaStore(),
 } = {}) {
   const app = express();
-  app.use(express.json());
+  // The default body limit is 100kb, which a bulk Q&A import blows straight
+  // past — ~1200 entries is around 134kb of JSON, and the request was being
+  // rejected before it reached any handler.
+  app.use(express.json({ limit: "25mb" }));
 
   // Serve the built Vite app (production). In dev the Vite server serves the
   // frontend and proxies /api here, so dist/ may not exist.

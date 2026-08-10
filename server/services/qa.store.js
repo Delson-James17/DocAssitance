@@ -40,8 +40,16 @@ export function createQaStore() {
     }
   })();
 
+  // Ordered by creation, with the id as a tie-break. The tie-break is what
+  // makes the order *stable*: a bulk import used to stamp every entry with an
+  // identical createdAt, so the comparator saw them all as equal and the list
+  // could come back in a different order on every request. On screen that
+  // looked like rows jumping around — and a quick key you'd just assigned
+  // appearing to land on the wrong entry.
   function sorted() {
-    return [...entries.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return [...entries.values()].sort(
+      (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+    );
   }
 
   return {
@@ -92,31 +100,46 @@ export function createQaStore() {
      */
     async addMany(pairs) {
       await ready;
-      const createdAt = new Date().toISOString();
-      const newEntries = pairs.map(({ question, answer, alternates = [] }) => ({
+      // One timestamp per entry, not one for the whole batch. Sharing a single
+      // createdAt across an import leaves nothing to order the rows by, and
+      // preserves the order of the file being imported only by accident.
+      const base = Date.now();
+      const newEntries = pairs.map(({ question, answer, alternates = [] }, index) => ({
         id: crypto.randomUUID(),
         question,
         alternates,
         answer,
         hotkey: null,
-        createdAt,
+        createdAt: new Date(base + index).toISOString(),
       }));
       for (const entry of newEntries) entries.set(entry.id, entry);
 
       if (supabaseEnabled && newEntries.length > 0) {
-        try {
-          const { error } = await supabase.from(TABLE).insert(
-            newEntries.map((e) => ({
-              id: e.id,
-              question: e.question,
-              alternates: e.alternates,
-              answer: e.answer,
-              created_at: e.createdAt,
-            })),
-          );
-          if (error) throw error;
-        } catch (err) {
-          console.warn(`[qa] Bulk import not persisted to Supabase (kept in memory): ${err.message}`);
+        // Sent in batches: a single insert of a thousand-plus rows is the kind
+        // of request that times out, and one failure would take the whole
+        // import with it.
+        const BATCH = 250;
+        const rows = newEntries.map((e) => ({
+          id: e.id,
+          question: e.question,
+          alternates: e.alternates,
+          answer: e.answer,
+          created_at: e.createdAt,
+        }));
+
+        for (let i = 0; i < rows.length; i += BATCH) {
+          const { error } = await supabase.from(TABLE).insert(rows.slice(i, i + BATCH));
+          if (error) {
+            // Deliberately *not* swallowed the way a single add is. An import
+            // is how someone restores their answers; reporting success while
+            // the rows only exist in memory means they disappear again at the
+            // next restart, which is worse than failing loudly here.
+            const saved = i;
+            for (const entry of newEntries.slice(saved)) entries.delete(entry.id);
+            throw new Error(
+              `Saved ${saved} of ${rows.length} entries, then the database rejected the rest: ${error.message}`,
+            );
+          }
         }
       }
       return newEntries;
@@ -152,6 +175,33 @@ export function createQaStore() {
         }
       }
       return true;
+    },
+
+    /**
+     * Removes every entry. Irreversible — there's no undo and no soft-delete,
+     * which is why the UI confirms with the count before calling this.
+     *
+     * Unlike the single-entry delete, an unreachable Supabase is reported
+     * rather than swallowed: dropping the rows locally while leaving them in
+     * the table would make the list reappear on the next restart, which looks
+     * like the delete silently failed.
+     *
+     * @returns {Promise<number>} how many entries were removed
+     */
+    async removeAll() {
+      await ready;
+      const count = entries.size;
+      if (count === 0) return 0;
+
+      if (supabaseEnabled) {
+        // Supabase requires a filter on delete; matching every non-null id is
+        // the documented way to express "all rows".
+        const { error } = await supabase.from(TABLE).delete().not("id", "is", null);
+        if (error) throw new Error(error.message);
+      }
+
+      entries.clear();
+      return count;
     },
   };
 }

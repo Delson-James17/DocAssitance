@@ -1,19 +1,51 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Console } from "./components/Console";
 import { QaPanel } from "./components/QaPanel";
+import { Settings } from "./components/Settings";
+import { useAppearance } from "./hooks/useAppearance";
 import { useQa } from "./hooks/useQa";
 import { useSpeechRecognition } from "./hooks/useSpeechRecognition";
 import { useTheme } from "./hooks/useTheme";
-import { askQuestion } from "./lib/api";
+import { askQuestion, askScreenshot as askScreenshotApi } from "./lib/api";
 import { DUPLICATE_THRESHOLD, similarity } from "./lib/dedupe";
 import { findRelatedContext, matchSavedQa } from "./lib/qaMatch";
 import { downloadQaTranscript, downloadTranscript } from "./lib/transcript";
 import type { RecordEntry } from "./types";
 
+// How close a spoken line has to be to the answer on screen before it's taken
+// as the user reading that answer out loud rather than asking something new.
+// Lower than DUPLICATE_THRESHOLD on purpose: someone reciting an answer
+// paraphrases, stumbles and skips words, so the match is never exact.
+const ANSWER_ECHO_THRESHOLD = 0.45;
+
 interface CachedAnswer {
   question: string;
   answer: string;
 }
+
+interface DesktopWindow {
+  minimize: () => void;
+  toggleMaximize: () => void;
+  close: () => void;
+  /** @returns whether the window is now pinned on top */
+  togglePin: () => Promise<boolean>;
+}
+
+// Present only in the desktop app. In the browser the title bar's buttons stay
+// decorative, which is what they always were.
+const desktopWindow: DesktopWindow | undefined = (
+  window as unknown as { desktop?: { window?: DesktopWindow } }
+).desktop?.window;
+
+interface DesktopScreenshot {
+  capture: () => Promise<{ dataUrl?: string; error?: string }>;
+}
+
+// Present only in the desktop app — capturing the screen needs OS-level
+// access the browser doesn't grant a web page.
+const desktopScreenshot: DesktopScreenshot | undefined = (
+  window as unknown as { desktop?: { screenshot?: DesktopScreenshot } }
+).desktop?.screenshot;
 
 function newId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -24,8 +56,30 @@ function newId(): string {
 export default function App() {
   const qa = useQa();
   const { theme, toggleTheme } = useTheme();
+  const {
+    appearance,
+    setUiOpacity,
+    setTextOpacity,
+    setLiveCaption,
+    setTextColor,
+    setBgColor,
+    reset: resetAppearance,
+  } = useAppearance();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [record, setRecord] = useState<RecordEntry[]>([]);
   const [qaOpen, setQaOpen] = useState(false);
+
+  // "Move": pins the real OS window on top of every other window (desktop
+  // only — there's no equivalent for a browser tab). Lives in App.tsx rather
+  // than either style's own component because it's the same underlying
+  // window regardless of which style is showing, and switching styles
+  // shouldn't reset it. Starts pinned to match main.cjs's own default — the
+  // whole point is that the window behaves like an overlay from launch,
+  // without needing a click first; Move is how you turn it back off.
+  const [pinned, setPinned] = useState(() => Boolean(desktopWindow));
+  const togglePin = useCallback(() => {
+    void desktopWindow?.togglePin().then((next) => setPinned(next));
+  }, []);
 
   // Persisted kill switch: when off, no question ever reaches the Claude
   // API, so it's a hard guarantee against burning tokens, not just a UI
@@ -145,57 +199,101 @@ export default function App() {
     [aiEnabled, qa.entries, pushQa, patchQa],
   );
 
-  // Ask mode: while on, every utterance is sent straight to ask() instead
-  // of just being transcribed. A ref (not just the state) because
-  // onFinalUtterance is a stable callback captured once by
-  // useSpeechRecognition's effect; reading state there would close over a
-  // stale value instead of whatever askMode actually is at the time each
-  // utterance comes in.
-  const [askMode, setAskMode] = useState(false);
-  const askModeRef = useRef(false);
+  // A question read visually (a shared doc, a coding platform, a slide)
+  // instead of heard. There's no text to match against saved Q&A or the
+  // answer cache the way ask() does — Claude reads the screenshot directly
+  // (native vision support) — so this always costs a Claude call and is a
+  // no-op with AI off, same as a spoken question would be in that case.
+  const askScreenshot = useCallback(() => {
+    if (!desktopScreenshot) return;
 
-  // Plain listening never auto-answers, even if something sounds like a
-  // question — it's a pure, accurate transcript of whatever was actually
-  // heard, nothing guessed or interpreted. The only way to get an answer
-  // from voice is to explicitly say so via ask mode (❓); typing a question
-  // always answers it too. Recording itself never stops when ask mode
-  // toggles on/off — it only changes how new utterances are classified, on
-  // the same continuous session, so nothing said in between is ever missed.
+    if (!aiEnabled) {
+      pushQa({
+        question: "📷 Screenshot",
+        answer: "",
+        pending: false,
+        source: "none",
+        error: "AI is off — turn it on to read a screenshot.",
+      });
+      return;
+    }
+
+    void (async () => {
+      const result = await desktopScreenshot.capture();
+      if (result.error || !result.dataUrl) {
+        pushQa({
+          question: "📷 Screenshot",
+          answer: "",
+          pending: false,
+          source: "none",
+          error: result.error ?? "Couldn't capture the screen.",
+        });
+        return;
+      }
+
+      const id = pushQa({
+        question: "📷 Screenshot",
+        answer: "",
+        pending: true,
+        source: "claude",
+      });
+
+      void askScreenshotApi(result.dataUrl, {
+        onDelta: (text) =>
+          setRecord((prev) =>
+            prev.map((e) =>
+              e.id === id && e.kind === "qa" ? { ...e, answer: e.answer + text } : e,
+            ),
+          ),
+        onDone: (answer) => patchQa(id, { pending: false, answer }),
+        onError: (message) => patchQa(id, { pending: false, error: message }),
+      });
+    })();
+  }, [aiEnabled, pushQa, patchQa]);
+
+  // The most recent answer shown, so it can be recognised if it's read back
+  // out loud. See the echo check in onFinalUtterance.
+  const lastAnswerRef = useRef("");
+  useEffect(() => {
+    const latest = record.find((e) => e.kind === "qa" && !e.pending && e.answer);
+    if (latest && latest.kind === "qa") lastAnswerRef.current = latest.answer;
+  }, [record]);
+
+  // Every utterance heard while listening gets answered — there's no
+  // question heuristic gating it anymore, since a missed "is this a
+  // question" guess meant a spoken question silently got filed as a note
+  // and never answered. The one thing still filtered out is the user's own
+  // voice reading the last answer back off the screen: without that check,
+  // every readback would immediately be re-asked as if it were new.
   const onFinalUtterance = useCallback(
     (utterance: string) => {
-      if (askModeRef.current) ask(utterance);
-      else addNote(utterance);
+      const answer = lastAnswerRef.current;
+      if (answer && similarity(utterance, answer) >= ANSWER_ECHO_THRESHOLD) {
+        addNote(utterance);
+        return;
+      }
+
+      ask(utterance);
     },
     [ask, addNote],
   );
 
-  const { supported, listening, interim, activeLang, toggle } =
-    useSpeechRecognition(onFinalUtterance);
+  const {
+    supported,
+    listening,
+    interim,
+    activeLang,
+    error: speechError,
+    toggle,
+  } = useSpeechRecognition(onFinalUtterance, {
+    liveCaption: appearance.liveCaption,
+  });
 
-  // Stopping the mic entirely also drops ask mode — there's nothing left
-  // listening for it to apply to.
-  const toggleListening = useCallback(() => {
-    if (listening) {
-      askModeRef.current = false;
-      setAskMode(false);
-    }
-    toggle();
-  }, [listening, toggle]);
-
-  // Turning ask mode on starts the mic too if it wasn't already running
-  // (so a single click is enough to start asking); turning it off just
-  // reverts to auto-detection without stopping the mic, so continuous
-  // recording carries on right through it either way.
-  const toggleAskMode = useCallback(() => {
-    const next = !askModeRef.current;
-    askModeRef.current = next;
-    setAskMode(next);
-    if (next && !listening) toggle();
-  }, [listening, toggle]);
+  const toggleListening = toggle;
 
   // Global keyboard shortcuts — a fallback for when clicking is inconvenient
-  // mid-practice. "." and space mirror the ▶/❓ buttons exactly (same
-  // toggles, same behavior); any digit or letter key instantly recalls
+  // mid-practice. "." and space both toggle listening (there is only one
+  // control now); any digit or letter key instantly recalls
   // whichever saved entry has that quick key assigned (see QaPanel.tsx),
   // pushing it
   // into the record and mini boxes exactly like a live saved-Q&A match
@@ -213,14 +311,9 @@ export default function App() {
     function onKeyDown(e: KeyboardEvent) {
       if (isEditableTarget(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
 
-      if (e.key === ".") {
+      if (e.key === "." || e.key === " ") {
         e.preventDefault();
         toggleListening();
-        return;
-      }
-      if (e.key === " ") {
-        e.preventDefault();
-        toggleAskMode();
         return;
       }
       // Case-insensitive: an entry assigned "q" answers to Q as well, so a
@@ -237,7 +330,7 @@ export default function App() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [qa.entries, toggleListening, toggleAskMode, pushQa]);
+  }, [qa.entries, toggleListening, pushQa]);
 
   const busy = record.some((e) => e.kind === "qa" && e.pending);
 
@@ -252,6 +345,7 @@ export default function App() {
   }, [record.length]);
 
   return (
+    <>
     <div className="term-app">
       <div className="title-bar">
         <span className="title-text">
@@ -259,35 +353,60 @@ export default function App() {
           C:\Users\Guest\VoiceDocAssistant
         </span>
         <span className="win-controls">
+          {/* Shows the theme you're *in*, not the one you'd switch to — the
+              other way round reads as a label and had people thinking they
+              were already in Glass mode. Where it goes next lives in the
+              tooltip. */}
           <button
             className="theme-toggle"
             onClick={toggleTheme}
             title={
               theme === "dark"
-                ? "Switch to light mode"
+                ? "Theme: Dark — click for Light"
                 : theme === "light"
-                  ? "Switch to transparent mode"
-                  : "Switch to dark mode"
+                  ? "Theme: Light — click for Glass"
+                  : "Theme: Glass — click for Dark"
             }
           >
-            {theme === "dark" ? "☀ Light" : theme === "light" ? "◐ Glass" : "☾ Dark"}
+            {theme === "dark" ? "☾ Dark" : theme === "light" ? "☀ Light" : "◐ Glass"}
           </button>
-          <span className="min">_</span>
-          <span className="max">□</span>
-          <span className="close">×</span>
+          <button
+            className={`theme-toggle settings-btn${settingsOpen ? " on" : ""}`}
+            onClick={() => setSettingsOpen((prev) => !prev)}
+            title="Appearance — background and text transparency"
+            aria-label="Appearance settings"
+          >
+            ⚙
+          </button>
+          <button
+            className={`theme-toggle settings-btn${pinned ? " on" : ""}`}
+            onClick={togglePin}
+            disabled={!desktopWindow}
+            title={
+              desktopWindow
+                ? pinned
+                  ? "Move: on — this window stays on top of everything else. Click to turn off."
+                  : "Move — keep this window on top of other apps, even after Alt+Tab"
+                : "Move is desktop-only — the browser build has no window to pin"
+            }
+          >
+            📌 Move
+          </button>
+          <button className="min" onClick={() => desktopWindow?.minimize()} title="Minimize">
+            &#8211;
+          </button>
+          <button
+            className="max"
+            onClick={() => desktopWindow?.toggleMaximize()}
+            title="Maximize"
+          >
+            &#9633;
+          </button>
+          <button className="close" onClick={() => desktopWindow?.close()} title="Close">
+            &#215;
+          </button>
         </span>
       </div>
-
-      <header>
-        <h1>
-          Voice Doc Assistant<span className="caret">&nbsp;</span>
-        </h1>
-        <p className="tagline">
-          Start talking — everything you say is transcribed as plain text.
-          Turn on ❓ ask mode (or just type) to get an answer from your saved
-          Q&A or Claude.
-        </p>
-      </header>
 
       <div className="workspace">
         <Console
@@ -296,11 +415,11 @@ export default function App() {
           busy={busy}
           interim={interim}
           onToggleMic={toggleListening}
-          askMode={askMode}
-          onToggleAskMode={toggleAskMode}
           speechLang={activeLang}
           record={record}
           onAsk={ask}
+          onScreenshot={askScreenshot}
+          screenshotAvailable={Boolean(desktopScreenshot)}
           aiEnabled={aiEnabled}
           onToggleAi={toggleAi}
           onDownload={() => downloadTranscript(record)}
@@ -316,16 +435,34 @@ export default function App() {
           onAdd={qa.add}
           onUpdate={qa.update}
           onRemove={qa.remove}
+          onRemoveAll={qa.removeAll}
           onImport={qa.importMany}
         />
       </div>
 
-      {!supported && (
+      {speechError && (
         <p className="unsupported">
-          ⚠ Your browser doesn't support the Web Speech API — you can still
-          type questions. Voice input needs Chrome or Edge.
+          ⚠ {speechError}
+          {!supported && " You can still type questions."}
         </p>
       )}
     </div>
+
+    {/* Deliberately a sibling of .term-app, not a child. .term-app clips its
+        overflow to keep square corners inside its rounded frame, which would
+        clip this popover out of existence — and its backdrop-filter makes it
+        a containing block, so even position: fixed wouldn't escape. */}
+    <Settings
+      open={settingsOpen}
+      onClose={() => setSettingsOpen(false)}
+      appearance={appearance}
+      onUiOpacity={setUiOpacity}
+      onTextOpacity={setTextOpacity}
+      onLiveCaption={setLiveCaption}
+      onTextColor={setTextColor}
+      onBgColor={setBgColor}
+      onReset={resetAppearance}
+    />
+    </>
   );
 }

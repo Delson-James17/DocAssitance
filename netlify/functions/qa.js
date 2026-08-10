@@ -108,6 +108,13 @@ export default async (req) => {
       return json({ entries: await store.list() });
     }
 
+    // Checked before the by-id delete below, or "all" is taken for an entry id
+    // — the same ordering the Express router needs (see server/http/routes.js).
+    if (req.method === "DELETE" && rest.length === 1 && rest[0] === "all") {
+      const removed = await store.removeAll();
+      return json({ removed, entries: await store.list() });
+    }
+
     if (req.method === "DELETE" && rest.length === 1) {
       const ok = await store.remove(rest[0]);
       if (!ok) return json({ error: "Entry not found." }, { status: 404 });

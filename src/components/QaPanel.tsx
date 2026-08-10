@@ -38,6 +38,7 @@ interface Props {
     fields: { question?: string; answer?: string; alternates?: string[]; hotkey?: string | null },
   ) => Promise<void>;
   onRemove: (id: string) => Promise<void>;
+  onRemoveAll: () => Promise<void>;
   onImport: (
     pairs: { question: string; answer: string; alternates?: string[] }[],
   ) => Promise<number>;
@@ -45,7 +46,15 @@ interface Props {
 
 // Collapsible drawer for the manually-curated Q&A table: an add form up
 // top, the saved list (question + answer, editable in place) below.
-export function QaPanel({ entries, open, onAdd, onUpdate, onRemove, onImport }: Props) {
+export function QaPanel({
+  entries,
+  open,
+  onAdd,
+  onUpdate,
+  onRemove,
+  onRemoveAll,
+  onImport,
+}: Props) {
   const [newQuestion, setNewQuestion] = useState("");
   const [newAnswer, setNewAnswer] = useState("");
   const [newAlternates, setNewAlternates] = useState("");
@@ -59,6 +68,9 @@ export function QaPanel({ entries, open, onAdd, onUpdate, onRemove, onImport }: 
 
   const importInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
+  // First click arms the delete, second one carries it out. See handleDeleteAll.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const [search, setSearch] = useState("");
   // Keyword filter over the question text *and* its alternate phrasings —
@@ -126,6 +138,36 @@ export function QaPanel({ entries, open, onAdd, onUpdate, onRemove, onImport }: 
     setBusyId(null);
   }
 
+  // Two clicks on purpose: this wipes every curated answer from the database,
+  // there is no undo, and the button sits next to Import where a misclick is
+  // easy. The single-entry [del] stays a one-click action.
+  //
+  // Confirmed in the UI rather than with a dialog. window.prompt() throws
+  // outright in Electron ("prompt() is not supported."), which silently killed
+  // the whole handler — the button appeared to do nothing at all. Nothing here
+  // depends on the host providing dialogs.
+  async function handleDeleteAll() {
+    const count = entries.length;
+    if (count === 0) return;
+
+    if (!confirmingDelete) {
+      setConfirmingDelete(true);
+      // Arming this shouldn't stay armed indefinitely — walking away and
+      // coming back to a primed delete button is exactly the misclick this is
+      // meant to prevent.
+      window.setTimeout(() => setConfirmingDelete(false), 6000);
+      return;
+    }
+
+    setConfirmingDelete(false);
+    setDeletingAll(true);
+    try {
+      await onRemoveAll();
+    } finally {
+      setDeletingAll(false);
+    }
+  }
+
   // Parses the picked .csv/.json file, drops rows that are empty or already
   // saved (exact-ish match against the current list, so re-importing the
   // same file twice doesn't double everything up), then bulk-adds the rest
@@ -182,6 +224,22 @@ export function QaPanel({ entries, open, onAdd, onUpdate, onRemove, onImport }: 
             disabled={importing}
           >
             {importing ? "Importing…" : "⭱ Import"}
+          </button>
+          <button
+            className={`link-btn${confirmingDelete ? " danger-armed" : ""}`}
+            title={
+              confirmingDelete
+                ? "Click again to permanently delete every saved entry — this cannot be undone"
+                : "Delete every saved Q&A entry"
+            }
+            onClick={handleDeleteAll}
+            disabled={entries.length === 0 || deletingAll}
+          >
+            {deletingAll
+              ? "Deleting…"
+              : confirmingDelete
+                ? `Delete all ${entries.length}? Click again`
+                : "✕ Delete all"}
           </button>
           <input
             ref={importInputRef}
@@ -306,9 +364,15 @@ export function QaPanel({ entries, open, onAdd, onUpdate, onRemove, onImport }: 
                             value={entry.hotkey ?? ""}
                             disabled={busyId === entry.id}
                             title="Quick-recall key — press this key (outside any text field) to instantly show this answer on screen, even if voice or typing isn't working. Assigning a key takes it from whichever entry currently has it."
-                            onChange={(e) =>
-                              void onUpdate(entry.id, { hotkey: e.target.value || null })
-                            }
+                            onChange={(e) => {
+                              // Hand focus back, or the key that was just
+                              // assigned does nothing: the global shortcut
+                              // handler ignores keystrokes aimed at a form
+                              // control, so the <select> keeping focus
+                              // swallows the very key it just bound.
+                              e.target.blur();
+                              void onUpdate(entry.id, { hotkey: e.target.value || null });
+                            }}
                           >
                             <option value="">Quick key: none</option>
                             {HOTKEY_ROWS.map((row) => (

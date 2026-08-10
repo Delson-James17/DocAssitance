@@ -29,6 +29,21 @@ export function createClaudeService(client = new Anthropic()) {
     return `Background you've saved (use only if relevant to the question below, otherwise ignore):\n${background}\n\nQuestion: ${question}`;
   }
 
+  /**
+   * The same "Background you've saved" preamble buildMessage() prepends for
+   * a text question, but as its own content block — an image message can't
+   * just concatenate it into one string the way a text question can.
+   *
+   * @param {{ question: string, answer: string }[]} context
+   */
+  function backgroundBlock(context) {
+    if (!context || context.length === 0) return null;
+    const background = context
+      .map((c) => `Q: ${c.question}\nA: ${c.answer}`)
+      .join("\n\n");
+    return `Background you've saved (use only if relevant to the question below, otherwise ignore):\n${background}\n`;
+  }
+
   return {
     /**
      * Start a streamed answer. Returns the SDK message stream so the caller
@@ -42,6 +57,32 @@ export function createClaudeService(client = new Anthropic()) {
         max_tokens: config.maxAnswerTokens,
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: buildMessage(context, question) }],
+      });
+    },
+
+    /**
+     * Same as streamAnswer, but the question is a screenshot rather than
+     * text — Claude reads whatever question is shown in the image directly
+     * (native vision support, no separate OCR step) and answers it.
+     *
+     * @param {{ imageBase64: string, mediaType: string, context?: { question: string, answer: string }[] }} params
+     */
+    streamAnswerFromImage({ imageBase64, mediaType, context }) {
+      const background = backgroundBlock(context);
+      const content = [
+        ...(background ? [{ type: "text", text: background }] : []),
+        { type: "image", source: { type: "base64", media_type: mediaType, data: imageBase64 } },
+        {
+          type: "text",
+          text: "Read the question shown in this screenshot and answer it.",
+        },
+      ];
+
+      return client.messages.stream({
+        model: config.model,
+        max_tokens: config.maxAnswerTokens,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: "user", content }],
       });
     },
   };

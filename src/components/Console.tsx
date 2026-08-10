@@ -38,11 +38,12 @@ interface Props {
   busy: boolean;
   interim: string;
   onToggleMic: () => void;
-  askMode: boolean;
-  onToggleAskMode: () => void;
   speechLang: "en-US" | "fil-PH";
   record: RecordEntry[];
   onAsk: (question: string) => void;
+  onScreenshot: () => void;
+  /** False in the web build — there's no OS-level screen capture to call. */
+  screenshotAvailable: boolean;
   aiEnabled: boolean;
   onToggleAi: () => void;
   onDownload: () => void;
@@ -59,11 +60,11 @@ export function Console({
   busy,
   interim,
   onToggleMic,
-  askMode,
-  onToggleAskMode,
   speechLang,
   record,
   onAsk,
+  onScreenshot,
+  screenshotAvailable,
   aiEnabled,
   onToggleAi,
   onDownload,
@@ -82,29 +83,18 @@ export function Console({
   // branch below), never the answer or its source badge. Each tab has its
   // own download regardless of which is currently showing.
   const [view, setView] = useState<"notes" | "qa">("notes");
-  const status = !listening
-    ? "idle"
-    : askMode
-      ? "asking"
-      : busy
-        ? "thinking"
-        : "listening";
+  const status = !listening ? "idle" : busy ? "thinking" : "listening";
   const qaEntries = record.filter(
     (e): e is Extract<RecordEntry, { kind: "qa" }> => e.kind === "qa",
   );
   const latestQa = qaEntries[0];
   const visibleRecord = view === "qa" ? qaEntries : record;
 
-  // Live partial speech only belongs in the Question box while ask mode is
-  // actually on — otherwise plain listening would flash whatever's
-  // currently being said through the box, then revert once it turns out
-  // not to be a question, which just looks broken. Recording into the
-  // Conversation tab (via App.tsx's onFinalUtterance/addNote) doesn't go
-  // through this component at all, so it keeps going exactly the same
-  // regardless of what these boxes show — this is purely a display filter,
-  // not a gate on what actually gets recorded.
-  const questionText = (askMode ? interim : "") || latestQa?.question || "";
-  const questionLive = askMode && Boolean(interim);
+  // Whatever is being said right now, falling back to the last answered
+  // question once speech stops. Purely a display choice — what actually gets
+  // recorded is decided in App.tsx's onFinalUtterance, not here.
+  const questionText = interim || latestQa?.question || "";
+  const questionLive = Boolean(interim);
 
   function submitTyped() {
     const q = typed.trim();
@@ -198,11 +188,25 @@ export function Console({
             </button>
           </div>
 
-          {visibleRecord.length === 0 && (
+          {/* Live caption. Speech is transcribed while it's still being
+              spoken (see mic.ts's onPartial), so this entry updates as the
+              words arrive and is replaced by the real one the moment the
+              speaker stops. Conversation only — Q&A only lists answered
+              questions, and a half-finished sentence isn't one yet. */}
+          {view === "notes" && interim && (
+            <div className="log-entry live">
+              <p className="log-note live">
+                {interim === "…" ? <span className="muted">Listening…</span> : interim}
+                <span className="type-caret" />
+              </p>
+            </div>
+          )}
+
+          {visibleRecord.length === 0 && !interim && (
             <p className="muted scrollback-empty">
               {view === "qa"
-                ? "No questions answered yet — turn on ❓ ask mode, or type a question below."
-                : "No history yet. Speak below — everything you say (including questions) is transcribed here, word for word."}
+                ? "No questions answered yet — press ▶ and ask one out loud, or type it below."
+                : "No history yet. Press ▶ and talk — everything you say is transcribed and answered."}
             </p>
           )}
           {visibleRecord.map((e) => {
@@ -248,7 +252,7 @@ export function Console({
           title={
             (listening
               ? "Stop listening"
-              : "Start listening — everything you say is transcribed as plain text, nothing is answered automatically") +
+              : "Start listening — everything you say is answered automatically") +
             " (shortcut: .)"
           }
         >
@@ -256,19 +260,16 @@ export function Console({
         </button>
 
         <button
-          className={`round-btn ask-btn${askMode ? " on" : ""}`}
-          onClick={onToggleAskMode}
-          disabled={!supported}
+          className="square-btn"
+          onClick={onScreenshot}
+          disabled={!screenshotAvailable}
           title={
-            (askMode
-              ? "Turn off ask mode — back to plain transcription (recording keeps going)"
-              : listening
-                ? "Switch to ask mode — everything you say from here is answered instead of just transcribed, recording keeps going"
-                : "Ask a question by voice — starts listening and answers everything you say until you turn it off") +
-            " (shortcut: space)"
+            screenshotAvailable
+              ? "Screenshot — capture the screen and let Claude answer whatever question is shown in it"
+              : "Screenshot is desktop-only — the browser build has no screen capture to call"
           }
         >
-          ❓
+          📷
         </button>
 
         <span

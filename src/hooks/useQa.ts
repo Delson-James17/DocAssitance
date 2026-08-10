@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { addQa, importQa, listQa, removeQa, updateQa } from "../lib/api";
+import { addQa, importQa, listQa, removeAllQa, removeQa, updateQa } from "../lib/api";
 import type { QaEntry } from "../types";
 
 interface UseQa {
@@ -10,6 +10,8 @@ interface UseQa {
     fields: { question?: string; answer?: string; alternates?: string[]; hotkey?: string | null },
   ) => Promise<void>;
   remove: (id: string) => Promise<void>;
+  /** Deletes every entry. Irreversible — confirm before calling. */
+  removeAll: () => Promise<void>;
   // Resolves to how many pairs actually got saved, so the caller (the
   // import UI) can report a count back to the user.
   importMany: (
@@ -56,6 +58,14 @@ export function useQa(): UseQa {
     }
   }, []);
 
+  const removeAll = useCallback(async () => {
+    try {
+      setEntries(await removeAllQa());
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Couldn't delete the saved Q&A.");
+    }
+  }, []);
+
   const importMany = useCallback(
     async (pairs: { question: string; answer: string; alternates?: string[] }[]) => {
       try {
@@ -70,5 +80,5 @@ export function useQa(): UseQa {
     [],
   );
 
-  return { entries, add, update, remove, importMany };
+  return { entries, add, update, remove, removeAll, importMany };
 }

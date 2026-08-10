@@ -17,6 +17,8 @@ export function createApiRouter({ ask, qa }) {
   router.post("/qa", qa.add);
   router.post("/qa/import", qa.import);
   router.patch("/qa/:id", qa.update);
+  // Before /qa/:id, or "all" would be read as an entry id.
+  router.delete("/qa/all", qa.removeAll);
   router.delete("/qa/:id", qa.remove);
 
   return router;

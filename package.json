@@ -4,16 +4,68 @@
   "description": "Real-time speech-to-text that answers spoken questions from a saved Q&A table or Claude.",
   "type": "module",
   "private": true,
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "dev:desktop": "node scripts/dev.mjs --electron",
     "dev:server": "node --watch server/index.js",
     "dev:web": "vite",
     "build": "vite build",
     "start": "node server/index.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "whisper:setup": "node scripts/fetch-whisper.mjs",
+    "desktop:pack": "npm run build && electron-builder --dir",
+    "desktop:dist": "npm run build && electron-builder"
   },
   "engines": {
     "node": ">=18.11"
+  },
+  "build": {
+    "appId": "com.voicedoc.assistant",
+    "productName": "Voice Doc Assistant",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "server/**/*",
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/whisper",
+        "to": "whisper",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.productivity",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Voice Doc Assistant transcribes your questions so it can answer them."
+      }
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility"
+    }
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",
@@ -27,6 +79,8 @@
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
     "netlify-cli": "^27.0.0",
     "typescript": "^5.5.4",
     "vite": "^5.4.2"

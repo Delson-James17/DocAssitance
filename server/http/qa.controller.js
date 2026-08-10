@@ -122,6 +122,16 @@ export function createQaController(store) {
       }
     },
 
+    async removeAll(_req, res) {
+      try {
+        const removed = await store.removeAll();
+        res.json({ removed, entries: await store.list() });
+      } catch (err) {
+        console.error(err);
+        res.status(400).json({ error: err?.message ?? "Could not delete the entries." });
+      }
+    },
+
     async remove(req, res) {
       try {
         const ok = await store.remove(req.params.id);

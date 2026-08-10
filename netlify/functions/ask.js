@@ -29,9 +29,9 @@ function jsonError(message, status) {
   });
 }
 
-// See server/http/ask.controller.js's cleanContext for the same logic —
-// duplicated rather than shared since the two backends don't share HTTP
-// glue, only the underlying claude.service.js call.
+// See server/http/ask.controller.js's cleanContext/cleanImage for the same
+// logic — duplicated rather than shared since the two backends don't share
+// HTTP glue, only the underlying claude.service.js call.
 function cleanContext(raw) {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -43,10 +43,18 @@ function cleanContext(raw) {
     .slice(0, 5);
 }
 
+function cleanImage(raw) {
+  const mediaType = (raw?.mediaType ?? "").toString();
+  const data = (raw?.data ?? "").toString();
+  if (!data || !/^image\/(png|jpe?g|gif|webp)$/.test(mediaType)) return null;
+  return { mediaType, data };
+}
+
 export default async (req) => {
   const body = await req.json().catch(() => ({}));
   const question = (body?.question ?? "").toString().trim();
-  if (!question) return jsonError("No question provided.", 400);
+  const image = cleanImage(body?.image);
+  if (!question && !image) return jsonError("No question or screenshot provided.", 400);
   const context = cleanContext(body?.context);
 
   const send = (controller, event, data) => {
@@ -56,7 +64,13 @@ export default async (req) => {
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        const messageStream = claude.streamAnswer({ question });
+        const messageStream = image
+          ? claude.streamAnswerFromImage({
+              imageBase64: image.data,
+              mediaType: image.mediaType,
+              context,
+            })
+          : claude.streamAnswer({ question, context });
         messageStream.on("text", (delta) => send(controller, "delta", { text: delta }));
 
         const final = await messageStream.finalMessage();

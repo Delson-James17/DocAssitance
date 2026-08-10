@@ -48,6 +48,11 @@ export async function removeQa(id: string): Promise<QaEntry[]> {
   return unwrapQa(await fetch(`/api/qa/${encodeURIComponent(id)}`, { method: "DELETE" }));
 }
 
+/** Deletes every saved entry. There is no undo — callers must confirm first. */
+export async function removeAllQa(): Promise<QaEntry[]> {
+  return unwrapQa(await fetch("/api/qa/all", { method: "DELETE" }));
+}
+
 export interface ImportQaResult {
   imported: number;
   entries: QaEntry[];
@@ -83,22 +88,9 @@ export interface AskContextEntry {
   answer: string;
 }
 
-// Ask a question and consume the Server-Sent Events stream from the
-// backend. `context` is an optional handful of loosely-related saved Q&A
-// pairs (see qaMatch.ts's findRelatedContext) — background Claude can draw
-// on to keep its answer consistent with real saved facts, when there's
-// nothing that directly answers the question but something still relevant.
-export async function askQuestion(
-  question: string,
-  handlers: AskHandlers,
-  context: AskContextEntry[] = [],
-): Promise<void> {
-  const res = await fetch("/api/ask", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question, context }),
-  });
-
+// Shared by askQuestion and askScreenshot below — both hit the same SSE
+// endpoint and only differ in what goes in the request body.
+async function consumeAskStream(res: Response, handlers: AskHandlers): Promise<void> {
   if (!res.ok || !res.body) {
     const err = (await res.json().catch(() => ({}))) as { error?: string };
     handlers.onError(err.error ?? `Request failed (${res.status})`);
@@ -133,4 +125,47 @@ export async function askQuestion(
         handlers.onError(data.message ?? "Something went wrong.");
     }
   }
+}
+
+// Ask a question and consume the Server-Sent Events stream from the
+// backend. `context` is an optional handful of loosely-related saved Q&A
+// pairs (see qaMatch.ts's findRelatedContext) — background Claude can draw
+// on to keep its answer consistent with real saved facts, when there's
+// nothing that directly answers the question but something still relevant.
+export async function askQuestion(
+  question: string,
+  handlers: AskHandlers,
+  context: AskContextEntry[] = [],
+): Promise<void> {
+  const res = await fetch("/api/ask", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question, context }),
+  });
+  await consumeAskStream(res, handlers);
+}
+
+// Same as askQuestion, but the question is a screenshot instead of typed or
+// spoken text — Claude reads whatever question is shown in the image
+// (Claude has native vision support, so there's no separate OCR step) and
+// answers it the same way. `dataUrl` is a "data:image/png;base64,...." URL,
+// e.g. straight from a <canvas> or the desktop screenshot bridge.
+export async function askScreenshot(
+  dataUrl: string,
+  handlers: AskHandlers,
+  context: AskContextEntry[] = [],
+): Promise<void> {
+  const match = /^data:([^;]+);base64,(.*)$/s.exec(dataUrl);
+  if (!match) {
+    handlers.onError("That screenshot couldn't be read.");
+    return;
+  }
+  const [, mediaType, data] = match;
+
+  const res = await fetch("/api/ask", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ image: { mediaType, data }, context }),
+  });
+  await consumeAskStream(res, handlers);
 }
