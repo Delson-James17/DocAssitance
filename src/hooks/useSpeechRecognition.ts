@@ -1,7 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { MicSession } from "../lib/mic";
+import { startMic, type MicSession } from "../lib/mic";
 import { startSystemAudio } from "../lib/systemAudio";
 import { detectSpeechLang, type SpeechLang } from "../lib/detectLang";
+
+/**
+ * Where speech comes from.
+ *
+ * "headset" is the original mode: it loops back whatever Windows is playing
+ * (see systemAudio.ts), which is why it "just works" while wearing
+ * headphones — nothing the headphones play leaks back into the microphone,
+ * so there's no feedback to filter out.
+ *
+ * Without headphones, the same audio comes out of the speakers and straight
+ * back into the mic, so looping back system audio would transcribe the
+ * meeting *and* its own echo. "mic" captures the microphone directly
+ * instead — the input device changes, but everything downstream (VAD, PCM,
+ * WAV framing in mic.ts) is identical either way.
+ */
+export type AudioSource = "headset" | "mic";
 
 // --- Why not the Web Speech API? ------------------------------------------
 // This used to be built on window.webkitSpeechRecognition. That API doesn't
@@ -97,6 +113,8 @@ interface UseSpeechRecognition {
 export interface SpeechOptions {
   /** Re-transcribe speech as it's spoken. Costs CPU — see useAppearance. */
   liveCaption?: boolean;
+  /** Which device to listen on — see the AudioSource doc comment above. */
+  source?: AudioSource;
 }
 
 export function useSpeechRecognition(
@@ -138,6 +156,10 @@ export function useSpeechRecognition(
   // immediately instead of needing the microphone restarted.
   const liveCaptionRef = useRef(false);
   liveCaptionRef.current = options.liveCaption === true;
+  // Read when toggle() opens a new session, so switching the setting takes
+  // effect on the next Play rather than needing anything else to change.
+  const sourceRef = useRef<AudioSource>("headset");
+  sourceRef.current = options.source ?? "headset";
   // Read inside the audio callback, which outlives any single render.
   const langRef = useRef<SpeechLang>(activeLang);
   langRef.current = activeLang;
@@ -160,8 +182,18 @@ export function useSpeechRecognition(
         }
         return;
       }
-      if (!navigator.mediaDevices?.getDisplayMedia) {
-        if (!cancelled) setError("System-audio capture is unavailable in this Electron build.");
+      const mediaApi =
+        sourceRef.current === "mic"
+          ? navigator.mediaDevices?.getUserMedia
+          : navigator.mediaDevices?.getDisplayMedia;
+      if (!mediaApi) {
+        if (!cancelled) {
+          setError(
+            sourceRef.current === "mic"
+              ? "Microphone capture is unavailable in this Electron build."
+              : "System-audio capture is unavailable in this Electron build.",
+          );
+        }
         return;
       }
 
@@ -373,7 +405,10 @@ export function useSpeechRecognition(
     // doesn't also pay for the ~1.5s model load.
     void getSpeech()?.warmUp();
 
-    startSystemAudio({
+    const useMic = sourceRef.current === "mic";
+    const startCapture = useMic ? startMic : startSystemAudio;
+
+    startCapture({
       onUtterance: handleUtterance,
       onPartial: handlePartial,
       // No partial transcript exists to show, so this is just a "you're being
@@ -405,15 +440,18 @@ export function useSpeechRecognition(
           return;
         }
         sessionRef.current = session;
-        // Only show the active/stop state once Windows has supplied actual
-        // loopback frames. Anything spoken before this point cannot be
-        // captured by the OS, so this prevents a misleading early indicator.
+        // Only show the active/stop state once the device has supplied
+        // actual frames — loopback frames from Windows, or real mic frames.
+        // Anything spoken before this point cannot be captured, so this
+        // prevents a misleading early indicator.
         setListening(true);
       })
       .catch((err: Error) => {
         setError(
           err.name === "NotAllowedError"
-            ? "Windows system-audio capture was denied or unavailable."
+            ? useMic
+              ? "Microphone access was denied. Allow the microphone permission and try again."
+              : "Windows system-audio capture was denied or unavailable."
             : err.message,
         );
         listeningRef.current = false;

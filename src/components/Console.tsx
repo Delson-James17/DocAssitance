@@ -39,6 +39,8 @@ interface Props {
   busy: boolean;
   interim: string;
   onToggleMic: () => void;
+  audioSource: "headset" | "mic";
+  onToggleAudioSource: () => void;
   speechLang: "en-US" | "fil-PH";
   record: RecordEntry[];
   onAsk: (question: string) => void;
@@ -62,6 +64,8 @@ export function Console({
   busy,
   interim,
   onToggleMic,
+  audioSource,
+  onToggleAudioSource,
   speechLang,
   record,
   onAsk,
@@ -208,7 +212,9 @@ export function Console({
             <p className="muted scrollback-empty">
               {view === "qa"
                 ? "No questions answered yet — press ▶ and ask one out loud, or type it below."
-                : "No history yet. Press ▶ while your meeting is playing — system audio is transcribed and answered."}
+                : audioSource === "mic"
+                  ? "No history yet. Press ▶ and speak — your microphone is transcribed and answered."
+                  : "No history yet. Press ▶ while your meeting is playing — system audio is transcribed and answered."}
             </p>
           )}
           {visibleRecord.map((e) => {
@@ -253,14 +259,31 @@ export function Console({
           disabled={!supported || starting}
           title={
             (starting
-              ? "Preparing Windows system-audio capture — start speaking when this button turns red"
+              ? `Preparing ${audioSource === "mic" ? "microphone" : "Windows system-audio"} capture — start speaking when this button turns red`
               : listening
-              ? "Stop transcribing meeting/system audio"
-              : "Start transcribing meeting/system audio (works with headphones)") +
+                ? `Stop transcribing ${audioSource === "mic" ? "microphone" : "meeting/system"} audio`
+                : audioSource === "mic"
+                  ? "Start transcribing your microphone (no headset needed)"
+                  : "Start transcribing meeting/system audio (works with headphones)") +
             " (shortcut: .)"
           }
         >
           {listening ? "⏸" : "▶"}
+        </button>
+
+        <button
+          className={`term-btn source-toggle${audioSource === "mic" ? " mic" : ""}`}
+          onClick={onToggleAudioSource}
+          disabled={listening || starting}
+          title={
+            listening || starting
+              ? "Stop listening to switch input source"
+              : audioSource === "headset"
+                ? "Input: Headset — transcribes meeting/system audio through headphones. Click to switch to microphone input (no headset)."
+                : "Input: Mic — transcribes your microphone directly, no headset needed. Click to switch to headset/system-audio input."
+          }
+        >
+          {audioSource === "headset" ? "🎧 Headset" : "🎤 Mic"}
         </button>
 
         <button

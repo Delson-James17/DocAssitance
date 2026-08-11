@@ -116,6 +116,23 @@ export default function App() {
     });
   }, []);
 
+  // Which device speech is captured from. "headset" loops back system audio
+  // (see systemAudio.ts) — it only works cleanly with headphones, since
+  // otherwise the speakers' own output leaks back into the mic. "mic"
+  // captures the microphone directly, for listening without a headset.
+  // Persisted like aiEnabled, and defaults to "headset" to match the
+  // behaviour that already existed before this toggle.
+  const [audioSource, setAudioSource] = useState<"headset" | "mic">(
+    () => (localStorage.getItem("audioSource") === "mic" ? "mic" : "headset"),
+  );
+  const toggleAudioSource = useCallback(() => {
+    setAudioSource((prev) => {
+      const next = prev === "headset" ? "mic" : "headset";
+      localStorage.setItem("audioSource", next);
+      return next;
+    });
+  }, []);
+
   // Non-question speech is kept verbatim — the record is the whole
   // conversation, not just the parts that got answered.
   const addNote = useCallback((text: string) => {
@@ -309,6 +326,7 @@ export default function App() {
     toggle,
   } = useSpeechRecognition(onFinalUtterance, {
     liveCaption: appearance.liveCaption,
+    source: audioSource,
   });
 
   const toggleListening = toggle;
@@ -454,6 +472,8 @@ export default function App() {
           busy={busy}
           interim={interim}
           onToggleMic={toggleListening}
+          audioSource={audioSource}
+          onToggleAudioSource={toggleAudioSource}
           speechLang={activeLang}
           record={record}
           onAsk={ask}

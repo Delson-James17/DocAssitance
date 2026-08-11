@@ -668,6 +668,19 @@ body {
   border-color: var(--red);
 }
 
+/* Which device speech is captured from — see AudioSource in
+   useSpeechRecognition.ts. Cyan for mic just to read as a distinct mode from
+   the default headset/system-audio state, not as an error or warning. */
+.source-toggle.mic {
+  color: var(--cyan);
+  border-color: color-mix(in srgb, var(--cyan) 55%, transparent);
+  background: color-mix(in srgb, var(--cyan) 12%, transparent);
+}
+.source-toggle.mic:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--cyan) 24%, transparent);
+  border-color: var(--cyan);
+}
+
 .src-tag {
   font-size: 0.68rem;
   text-transform: uppercase;
