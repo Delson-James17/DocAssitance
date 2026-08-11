@@ -218,6 +218,23 @@ to pull; expect roughly 2-3× the latency above.
 whisper.cpp from source and drop `whisper-server` plus its libraries into
 `vendor/whisper/bin/`; the script will tell you this if you run it there.
 
+### Meeting/system audio transcription (Windows)
+
+The existing green **▶** button transcribes the Windows output mix, rather than
+the microphone. Start a Teams, Zoom, Meet, or browser call, then click **▶**;
+its audio is captured even when the output device is headphones. Recognized
+questions go through the normal saved-Q&A/Claude answer flow. The stream is
+processed in-memory with voice activity detection, resampled to 16 kHz mono
+PCM WAV, and sent as short chunks to the same local Whisper process; audio is
+never saved.
+
+This uses Electron's `setDisplayMediaRequestHandler` with `audio: "loopback"`
+to grant only the primary display's output-audio stream. It is Windows desktop
+only and is separate from microphone permission. If it says no system audio is
+available, make sure Windows has an active output device and that the meeting
+is playing audio; protected/DRM content and device drivers that block loopback
+cannot be captured. Stop releases every audio track immediately.
+
 ### Why the runtime lives outside the asar
 
 Packaged builds put the whisper files in `resources/whisper/` via

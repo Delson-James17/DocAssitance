@@ -465,6 +465,20 @@ body {
   background: color-mix(in srgb, var(--green) 16%, transparent);
 }
 
+/* Announces a toggle result to assistive technology without taking space from
+   the deliberately compact title bar. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .title-bar .title-text {
   display: flex;
   align-items: center;
@@ -1019,6 +1033,10 @@ body {
   border-color: var(--cyan);
 }
 .status.thinking {
+  color: var(--yellow);
+  border-color: var(--yellow);
+}
+.status.preparing {
   color: var(--yellow);
   border-color: var(--yellow);
 }

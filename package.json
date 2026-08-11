@@ -1,6 +1,6 @@
 {
   "name": "voice-doc-assistant",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Real-time speech-to-text that answers spoken questions from a saved Q&A table or Claude.",
   "type": "module",
   "private": true,

@@ -148,6 +148,17 @@ function createWindow(url) {
     },
   });
 
+  // Privacy-first default: on supported Windows versions this requests
+  // WDA_EXCLUDEFROMCAPTURE before the window is shown. The window is still
+  // fully visible and interactive on the user's own monitor.
+  if (process.platform === "win32" && typeof win.setContentProtection === "function") {
+    try {
+      win.setContentProtection(true);
+    } catch (err) {
+      console.warn("[desktop] could not enable capture exclusion by default:", err.message);
+    }
+  }
+
   win.once("ready-to-show", () => win.show());
 
   // The mic prompt has no meaning here — there's no browser chrome to show
@@ -164,6 +175,25 @@ function createWindow(url) {
     (_webContents, permission, requestOrigin) =>
       permission === "media" && requestOrigin === origin,
   );
+
+  // Permit only this window's user-initiated display-media request and attach
+  // Windows' output loopback track. The renderer cannot select a source or
+  // request the microphone through this handler.
+  win.webContents.session.setDisplayMediaRequestHandler(async (_request, callback) => {
+    try {
+      const display = screen.getPrimaryDisplay();
+      const sources = await desktopCapturer.getSources({
+        types: ["screen"],
+        thumbnailSize: { width: 1, height: 1 },
+      });
+      const source = sources.find((item) => item.display_id === String(display.id)) ?? sources[0];
+      if (!source) return callback({});
+      callback({ video: source, audio: "loopback" });
+    } catch (err) {
+      console.error("[system-audio] could not start Windows loopback", err);
+      callback({});
+    }
+  });
 
   // External links open in the real browser rather than replacing the app.
   win.webContents.setWindowOpenHandler(({ url: target }) => {
@@ -235,6 +265,40 @@ if (!app.requestSingleInstanceLock()) {
     alwaysOnTopManual = !alwaysOnTopManual;
     applyAlwaysOnTop(win);
     return alwaysOnTopManual;
+  });
+
+  // Electron maps this to SetWindowDisplayAffinity on Windows. Modern
+  // Windows 10/11 use WDA_EXCLUDEFROMCAPTURE; older Windows releases and
+  // some capture programs may not honour it, so this is a best-effort request.
+  // It never hides, minimises, or otherwise changes the local window.
+  ipcMain.handle("window:set-content-protection", (event, enabled) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || typeof enabled !== "boolean") {
+      return { ok: false, enabled: false, reason: "Window is unavailable." };
+    }
+    if (process.platform !== "win32" || typeof win.setContentProtection !== "function") {
+      return {
+        ok: false,
+        enabled: false,
+        reason: "Screen-sharing exclusion is only available in the Windows desktop app.",
+      };
+    }
+    try {
+      win.setContentProtection(enabled);
+      return {
+        ok: true,
+        enabled,
+        reason: enabled
+          ? "Capture exclusion requested. Some Windows versions and capture apps may not support it."
+          : "Capture exclusion turned off.",
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        enabled: false,
+        reason: `Could not change capture exclusion: ${err.message}`,
+      };
+    }
   });
 
   // --- Screenshot question --------------------------------------------------

@@ -34,6 +34,7 @@ function SourceTag({ source }: { source: QaSource }) {
 
 interface Props {
   supported: boolean;
+  starting: boolean;
   listening: boolean;
   busy: boolean;
   interim: string;
@@ -56,6 +57,7 @@ interface Props {
 
 export function Console({
   supported,
+  starting,
   listening,
   busy,
   interim,
@@ -83,7 +85,7 @@ export function Console({
   // branch below), never the answer or its source badge. Each tab has its
   // own download regardless of which is currently showing.
   const [view, setView] = useState<"notes" | "qa">("notes");
-  const status = !listening ? "idle" : busy ? "thinking" : "listening";
+  const status = starting ? "preparing" : !listening ? "idle" : busy ? "thinking" : "listening";
   const qaEntries = record.filter(
     (e): e is Extract<RecordEntry, { kind: "qa" }> => e.kind === "qa",
   );
@@ -206,7 +208,7 @@ export function Console({
             <p className="muted scrollback-empty">
               {view === "qa"
                 ? "No questions answered yet — press ▶ and ask one out loud, or type it below."
-                : "No history yet. Press ▶ and talk — everything you say is transcribed and answered."}
+                : "No history yet. Press ▶ while your meeting is playing — system audio is transcribed and answered."}
             </p>
           )}
           {visibleRecord.map((e) => {
@@ -248,11 +250,13 @@ export function Console({
         <button
           className={`round-btn${listening ? " on" : ""}`}
           onClick={onToggleMic}
-          disabled={!supported}
+          disabled={!supported || starting}
           title={
-            (listening
-              ? "Stop listening"
-              : "Start listening — everything you say is answered automatically") +
+            (starting
+              ? "Preparing Windows system-audio capture — start speaking when this button turns red"
+              : listening
+              ? "Stop transcribing meeting/system audio"
+              : "Start transcribing meeting/system audio (works with headphones)") +
             " (shortcut: .)"
           }
         >

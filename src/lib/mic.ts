@@ -42,7 +42,7 @@ const NOISE_ADAPT = 0.05;
  * during the speaker's natural pause instead of after their last word, so by
  * the time they finish, everything but the final chunk is already text.
  */
-const SILENCE_HOLD_MS = 450;
+const SILENCE_HOLD_MS = 350;
 
 /**
  * Audio kept from *before* the gate opened.
@@ -179,6 +179,21 @@ export async function startMic(handlers: MicHandlers): Promise<MicSession> {
     },
   });
 
+  return startAudioStream(stream, handlers);
+}
+
+/**
+ * Turns an already-authorized audio stream into 16 kHz mono WAV utterances.
+ *
+ * Keeping processing separate from acquisition lets the meeting-audio source
+ * use the exact same VAD, PCM conversion and cleanup path as the microphone.
+ * The stream is never persisted; its tracks are stopped by the returned
+ * session.
+ */
+export async function startAudioStream(
+  stream: MediaStream,
+  handlers: MicHandlers,
+): Promise<MicSession> {
   // Asking for 16kHz up front means the browser resamples for us.
   const context = new AudioContext({ sampleRate: SAMPLE_RATE });
 

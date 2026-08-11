@@ -32,6 +32,9 @@ contextBridge.exposeInMainWorld("desktop", {
      * @returns {Promise<boolean>} whether the window is now pinned
      */
     togglePin: () => ipcRenderer.invoke("window:toggle-pin"),
+    /** Requests Windows capture exclusion without hiding the local window. */
+    setContentProtection: (enabled) =>
+      ipcRenderer.invoke("window:set-content-protection", enabled),
   },
 
   // Screenshot question: captures the screen so a question shown visually

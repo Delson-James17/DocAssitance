@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { startMic, type MicSession } from "../lib/mic";
+import type { MicSession } from "../lib/mic";
+import { startSystemAudio } from "../lib/systemAudio";
 import { detectSpeechLang, type SpeechLang } from "../lib/detectLang";
 
 // --- Why not the Web Speech API? ------------------------------------------
@@ -43,14 +44,14 @@ const WHISPER_LANG: Record<SpeechLang, string> = {
  * It is deliberately long enough to survive a *whole speaking turn*, not just
  * one sentence. Someone asking a multi-part question breathes between clauses
  * ("...technical questions," pause, "could you please introduce yourself")
- * and those gaps routinely pass a second. Two seconds is comfortably longer
- * than a mid-turn breath and comfortably shorter than the silence that
- * follows an actual hand-over, so the whole turn arrives as one message.
+ * and those gaps routinely pass a second. For meeting questions, the audio
+ * gate already waits for a real silence before handing Whisper a chunk, so an
+ * additional message-gap delay only makes a completed question feel late.
  *
  * This is the main speed/completeness dial. Lower it for a snappier reply at
  * the cost of chopping long questions into pieces.
  */
-const MESSAGE_GAP_MS = 2000;
+const MESSAGE_GAP_MS = 0;
 
 /**
  * Hard ceiling on a single message, so an uninterrupted monologue eventually
@@ -74,6 +75,8 @@ function getSpeech(): DesktopSpeech | null {
 
 interface UseSpeechRecognition {
   supported: boolean;
+  /** Windows is still opening the output-audio stream; do not speak yet. */
+  starting: boolean;
   listening: boolean;
   /** "…" while an utterance is in progress — see the note above. */
   interim: string;
@@ -101,6 +104,7 @@ export function useSpeechRecognition(
   options: SpeechOptions = {},
 ): UseSpeechRecognition {
   const [supported, setSupported] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState("");
   const [finalText, setFinalText] = useState("");
@@ -156,8 +160,8 @@ export function useSpeechRecognition(
         }
         return;
       }
-      if (!navigator.mediaDevices?.getUserMedia) {
-        if (!cancelled) setError("No microphone access is available here.");
+      if (!navigator.mediaDevices?.getDisplayMedia) {
+        if (!cancelled) setError("System-audio capture is unavailable in this Electron build.");
         return;
       }
 
@@ -166,6 +170,9 @@ export function useSpeechRecognition(
       if (result.ok) {
         setSupported(true);
         setError(null);
+        // Starting whisper here means the first meeting sentence does not
+        // wait for the model process to boot after the user presses Play.
+        void speech.warmUp();
       } else {
         setError(result.error ?? "Speech engine unavailable.");
       }
@@ -176,7 +183,7 @@ export function useSpeechRecognition(
     };
   }, []);
 
-  // Stop the microphone if the component goes away mid-session.
+  // Stop the Windows loopback stream if the component goes away mid-session.
   useEffect(() => {
     return () => {
       sessionRef.current?.stop();
@@ -351,23 +358,22 @@ export function useSpeechRecognition(
       return;
     }
 
-    // Opening the mic is asynchronous, and until it resolves sessionRef is
-    // still null — so a second click (or the "." / space shortcut firing
-    // twice) would open a *second* microphone that nothing ever closes.
+    // Opening the loopback stream is asynchronous, and until it resolves
+    // sessionRef is still null — a second click cannot open another stream.
     if (startingRef.current) return;
     startingRef.current = true;
+    setStarting(true);
 
     setFinalText("");
     setInterim("");
     setError(null);
     listeningRef.current = true;
-    setListening(true);
 
     // Load the model while the user is drawing breath, so the first utterance
     // doesn't also pay for the ~1.5s model load.
     void getSpeech()?.warmUp();
 
-    startMic({
+    startSystemAudio({
       onUtterance: handleUtterance,
       onPartial: handlePartial,
       // No partial transcript exists to show, so this is just a "you're being
@@ -399,11 +405,15 @@ export function useSpeechRecognition(
           return;
         }
         sessionRef.current = session;
+        // Only show the active/stop state once Windows has supplied actual
+        // loopback frames. Anything spoken before this point cannot be
+        // captured by the OS, so this prevents a misleading early indicator.
+        setListening(true);
       })
       .catch((err: Error) => {
         setError(
           err.name === "NotAllowedError"
-            ? "Microphone permission was denied."
+            ? "Windows system-audio capture was denied or unavailable."
             : err.message,
         );
         listeningRef.current = false;
@@ -412,8 +422,9 @@ export function useSpeechRecognition(
       })
       .finally(() => {
         startingRef.current = false;
+        setStarting(false);
       });
   }, [handleUtterance, handlePartial, scheduleFlush, refreshInterim]);
 
-  return { supported, listening, interim, finalText, activeLang, error, toggle };
+  return { supported, starting, listening, interim, finalText, activeLang, error, toggle };
 }

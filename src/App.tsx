@@ -29,6 +29,13 @@ interface DesktopWindow {
   close: () => void;
   /** @returns whether the window is now pinned on top */
   togglePin: () => Promise<boolean>;
+  setContentProtection: (enabled: boolean) => Promise<ContentProtectionResult>;
+}
+
+interface ContentProtectionResult {
+  ok: boolean;
+  enabled: boolean;
+  reason: string;
 }
 
 // Present only in the desktop app. In the browser the title bar's buttons stay
@@ -80,6 +87,20 @@ export default function App() {
   const togglePin = useCallback(() => {
     void desktopWindow?.togglePin().then((next) => setPinned(next));
   }, []);
+
+  // Display affinity belongs to the current native window, so it is not
+  // persisted after the application closes.
+  // The native window enables this by default during creation (main.cjs).
+  // Browser builds have no native window or capture-exclusion capability.
+  const [hiddenFromSharing, setHiddenFromSharing] = useState(() => Boolean(desktopWindow));
+  const [sharingStatus, setSharingStatus] = useState("");
+  const toggleContentProtection = useCallback(() => {
+    if (!desktopWindow) return;
+    void desktopWindow.setContentProtection(!hiddenFromSharing).then((result) => {
+      setSharingStatus(result.reason);
+      if (result.ok) setHiddenFromSharing(result.enabled);
+    });
+  }, [hiddenFromSharing]);
 
   // Persisted kill switch: when off, no question ever reaches the Claude
   // API, so it's a hard guarantee against burning tokens, not just a UI
@@ -280,6 +301,7 @@ export default function App() {
 
   const {
     supported,
+    starting,
     listening,
     interim,
     activeLang,
@@ -392,6 +414,22 @@ export default function App() {
           >
             📌 Move
           </button>
+          <button
+            className={`theme-toggle settings-btn${hiddenFromSharing ? " on" : ""}`}
+            onClick={toggleContentProtection}
+            disabled={!desktopWindow}
+            title={
+              desktopWindow
+                ? hiddenFromSharing
+                  ? "Hide from Screen Sharing: on — click to allow capture again"
+                  : "Hide from Screen Sharing — request exclusion from supported Windows capture methods"
+                : "Hide from Screen Sharing is only available in the Windows desktop app"
+            }
+            aria-pressed={hiddenFromSharing}
+          >
+            🛡
+          </button>
+          {sharingStatus && <span className="sr-only" role="status">{sharingStatus}</span>}
           <button className="min" onClick={() => desktopWindow?.minimize()} title="Minimize">
             &#8211;
           </button>
@@ -411,6 +449,7 @@ export default function App() {
       <div className="workspace">
         <Console
           supported={supported}
+          starting={starting}
           listening={listening}
           busy={busy}
           interim={interim}
