@@ -5,6 +5,7 @@ dist/
 
 # Packaged desktop builds (electron-builder output)
 release/
+release-build-temp/
 
 # whisper.cpp binaries + model (~150MB) — run `npm run whisper:setup`
 vendor/
