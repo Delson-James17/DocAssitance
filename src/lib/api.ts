@@ -88,6 +88,14 @@ export interface AskContextEntry {
   answer: string;
 }
 
+export type PersonaPreset = "default" | "professional" | "friendly" | "jolly" | "custom";
+
+export interface Persona {
+  preset: PersonaPreset;
+  /** Only used when preset is "custom". */
+  custom: string;
+}
+
 // Shared by askQuestion and askScreenshot below — both hit the same SSE
 // endpoint and only differ in what goes in the request body.
 async function consumeAskStream(res: Response, handlers: AskHandlers): Promise<void> {
@@ -136,11 +144,12 @@ export async function askQuestion(
   question: string,
   handlers: AskHandlers,
   context: AskContextEntry[] = [],
+  persona?: Persona,
 ): Promise<void> {
   const res = await fetch("/api/ask", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question, context }),
+    body: JSON.stringify({ question, context, persona }),
   });
   await consumeAskStream(res, handlers);
 }
@@ -154,6 +163,7 @@ export async function askScreenshot(
   dataUrl: string,
   handlers: AskHandlers,
   context: AskContextEntry[] = [],
+  persona?: Persona,
 ): Promise<void> {
   const match = /^data:([^;]+);base64,(.*)$/s.exec(dataUrl);
   if (!match) {
@@ -165,7 +175,7 @@ export async function askScreenshot(
   const res = await fetch("/api/ask", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ image: { mediaType, data }, context }),
+    body: JSON.stringify({ image: { mediaType, data }, context, persona }),
   });
   await consumeAskStream(res, handlers);
 }

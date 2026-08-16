@@ -171,10 +171,20 @@ The three themes (**Dark / Light / Glass**, cycled from the title-bar button)
 are all glass; they differ in tint and backdrop. **Glass** drops the page
 background entirely so the desktop shows through the window.
 
-On Windows 11 the window also sets `backgroundMaterial: "acrylic"`, which is
-what actually frosts the desktop behind it. CSS `backdrop-filter` can't do
-that — it only blurs content the page itself painted — so without acrylic the
-Glass theme would be a plain dim overlay rather than frosted glass.
+Settings (⚙) has a **Window blur** toggle: **Clear** creates the window with
+`transparent: true`, so the desktop behind it shows through crisp and
+unblurred; **Frosted** uses `backgroundMaterial: "acrylic"` instead — Windows'
+frosted-glass blur, a fixed radius the OS controls with no API to adjust it.
+The two are mutually exclusive on Windows, so switching rebuilds the native
+window. CSS `backdrop-filter` can't stand in for either — it only blurs
+content the page itself painted, not the real desktop behind a transparent
+window.
+
+Windows doesn't hit-test a transparent window's edges by default, which would
+normally break drag-to-resize in Clear mode. `electron/main.cjs` restores it
+with a `WM_NCHITTEST` hook (`win.setNextHitTest`) that classifies the cursor
+against the window's borders manually — the same technique Electron's own
+docs recommend for a resizable transparent window.
 
 ### Speech-to-text setup
 

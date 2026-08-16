@@ -40,38 +40,10 @@ const WHISPER_LANG: Record<SpeechLang, string> = {
 };
 
 /**
- * How long to wait after someone stops speaking before deciding the message
- * is finished.
- *
- * People pause between sentences. The microphone gate (src/lib/mic.ts) has to
- * cut on those pauses — that's what lets transcription start straight away
- * instead of waiting for the whole monologue — but each cut used to become its
- * own entry, so one spoken introduction arrived as five fragments and the Q&A
- * matcher only ever saw a piece of the question.
- *
- * So the cut and the *message boundary* are now two different things: audio is
- * still cut early and transcribed eagerly, and the resulting pieces are glued
- * back together unless the speaker really has finished.
- *
- * This window is measured from the moment speech stopped, and runs at the same
- * time as transcription rather than after it. When transcription takes longer
- * than the window — the normal case on a slower machine — merging is free.
- *
- * It is deliberately long enough to survive a *whole speaking turn*, not just
- * one sentence. Someone asking a multi-part question breathes between clauses
- * ("...technical questions," pause, "could you please introduce yourself")
- * and those gaps routinely pass a second. For meeting questions, the audio
- * gate already waits for a real silence before handing Whisper a chunk, so an
- * additional message-gap delay only makes a completed question feel late.
- *
- * This is the main speed/completeness dial. Lower it for a snappier reply at
- * the cost of chopping long questions into pieces.
- */
-const MESSAGE_GAP_MS = 0;
-
-/**
  * Hard ceiling on a single message, so an uninterrupted monologue eventually
- * gets handed over instead of growing without bound.
+ * gets handed over instead of growing without bound, even if Stop is never
+ * pressed. Not the normal way a message ends — see scheduleFlush below,
+ * which otherwise only hands a message over when the user presses Stop.
  */
 const MAX_MESSAGE_MS = 90_000;
 
@@ -139,12 +111,18 @@ export function useSpeechRecognition(
   // close over a stale value.
   const listeningRef = useRef(false);
 
-  // --- Message assembly (see MESSAGE_GAP_MS) ---
+  // --- Message assembly ---
+  // A message is handed over only when the user presses Stop (see toggle()
+  // below) or the MAX_MESSAGE_MS ceiling fires — never on a mid-speech pause.
+  // Pauses used to end a message on their own (a MESSAGE_GAP_MS timer armed
+  // after every silence), which is what made the app answer while the
+  // question was still being asked; scheduleFlush now only ever fires from
+  // an explicit Stop (via stoppingRef) or that ceiling.
   /** Transcribed pieces of the message currently being spoken. */
   const partsRef = useRef<string[]>([]);
-  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** When speech last stopped — the message-gap window counts from here. */
-  const lastSpeechEndRef = useRef(0);
+  /** Set by Stop; tells scheduleFlush the *next* time nothing is pending is
+   *  a real end-of-message, not just a breathing pause. */
+  const stoppingRef = useRef(false);
   /** When the current message began, for the MAX_MESSAGE_MS ceiling. */
   const messageStartRef = useRef(0);
   const speakingRef = useRef(false);
@@ -220,7 +198,6 @@ export function useSpeechRecognition(
     return () => {
       sessionRef.current?.stop();
       sessionRef.current = null;
-      if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
     };
   }, []);
 
@@ -239,11 +216,6 @@ export function useSpeechRecognition(
 
   /** Hands the assembled message over as one utterance. */
   const emitMessage = useCallback(() => {
-    if (flushTimerRef.current) {
-      clearTimeout(flushTimerRef.current);
-      flushTimerRef.current = null;
-    }
-
     const message = partsRef.current.join(" ").replace(/\s+/g, " ").trim();
     partsRef.current = [];
     partialRef.current = "";
@@ -261,46 +233,39 @@ export function useSpeechRecognition(
   }, []);
 
   /**
-   * Emits once the speaker has been quiet for MESSAGE_GAP_MS and nothing is
-   * still transcribing. Called after every piece; each call re-arms the timer,
-   * so a message only lands when the pause is genuinely a full stop.
+   * The only place a message can end. Called after every transcribed piece
+   * and every speaking-stop event, but a plain pause does nothing here — it
+   * takes either stoppingRef (set by the user pressing Stop) or the
+   * MAX_MESSAGE_MS ceiling to actually emit. Whichever condition isn't met
+   * yet, a later call (the next piece finishing, or Stop itself) re-checks.
    */
   const scheduleFlush = useCallback(() => {
-    if (flushTimerRef.current) {
-      clearTimeout(flushTimerRef.current);
-      flushTimerRef.current = null;
-    }
-    // Still talking, or a piece is still in the transcriber — the message
-    // isn't over. Whichever finishes last will re-arm this.
+    // Still talking, or a piece is still in the transcriber — not settled
+    // enough to decide anything yet. Whichever finishes last calls this again.
     if (speakingRef.current || pendingRef.current > 0) return;
-    if (partsRef.current.length === 0) return;
 
-    // A monologue that never pauses would otherwise never be handed over.
-    if (messageStartRef.current && Date.now() - messageStartRef.current > MAX_MESSAGE_MS) {
+    if (partsRef.current.length === 0) {
+      stoppingRef.current = false;
+      return;
+    }
+
+    if (stoppingRef.current) {
+      stoppingRef.current = false;
       emitMessage();
       return;
     }
 
-    // Count from when speech stopped, not from now, so the time already spent
-    // transcribing counts towards the gap instead of being added to it.
-    const elapsed = Date.now() - lastSpeechEndRef.current;
-    const wait = Math.max(0, MESSAGE_GAP_MS - elapsed);
-    flushTimerRef.current = setTimeout(emitMessage, wait);
+    // Safety net for a monologue that's still going with Stop never pressed.
+    if (messageStartRef.current && Date.now() - messageStartRef.current > MAX_MESSAGE_MS) {
+      emitMessage();
+      return;
+    }
   }, [emitMessage]);
 
   const handleUtterance = useCallback(
     async (wav: ArrayBuffer) => {
       const speech = getSpeech();
       if (!speech) return;
-
-      // A new piece is in flight, so the message is not over — cancel any
-      // hand-off already armed by the previous piece. Without this, a flush
-      // scheduled after sentence one fires while sentence two is still being
-      // transcribed, and the message splits in two after all.
-      if (flushTimerRef.current) {
-        clearTimeout(flushTimerRef.current);
-        flushTimerRef.current = null;
-      }
 
       // Transcription takes about a second, during which the user has stopped
       // talking and nothing has appeared yet. Without this the app looks
@@ -380,12 +345,15 @@ export function useSpeechRecognition(
     if (sessionRef.current || listeningRef.current) {
       listeningRef.current = false;
       speakingRef.current = false;
+      // The only place this is set — it's what turns the *next* settled
+      // moment (this call, or once the final piece below finishes
+      // transcribing) into a real end-of-message instead of another pause.
+      stoppingRef.current = true;
       // stop() flushes any buffered audio, so let that last piece transcribe
       // and land before giving up on the message.
       sessionRef.current?.stop();
       sessionRef.current = null;
       setListening(false);
-      lastSpeechEndRef.current = Date.now();
       scheduleFlush();
       return;
     }
@@ -416,18 +384,11 @@ export function useSpeechRecognition(
       onSpeakingChange: (speaking) => {
         speakingRef.current = speaking;
         if (speaking) {
-          // They've started again — this is a continuation, not a new
-          // message. Cancel any pending hand-off and keep collecting.
-          if (flushTimerRef.current) {
-            clearTimeout(flushTimerRef.current);
-            flushTimerRef.current = null;
-          }
           // Keep whatever has been assembled so far on screen — replacing it
           // with a bare "…" every time they draw breath would make a long
           // question flicker between text and nothing.
           refreshInterim();
         } else {
-          lastSpeechEndRef.current = Date.now();
           scheduleFlush();
         }
       },

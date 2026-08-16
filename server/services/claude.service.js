@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../config.js";
-import { SYSTEM_PROMPT } from "../prompts.js";
+import { SYSTEM_PROMPT, personaInstruction } from "../prompts.js";
 
 /**
  * Wraps the Anthropic SDK with this app's answering logic. The `client` is
@@ -44,18 +44,31 @@ export function createClaudeService(client = new Anthropic()) {
     return `Background you've saved (use only if relevant to the question below, otherwise ignore):\n${background}\n`;
   }
 
+  /**
+   * SYSTEM_PROMPT plus an optional tone instruction — appended rather than
+   * interpolated into the base prompt, so a persona can only add a stylistic
+   * note on top, never rewrite the rules above it (first-person practice
+   * answers, staying consistent with saved background, and so on).
+   *
+   * @param {{ preset?: string, custom?: string }} [persona]
+   */
+  function buildSystemPrompt(persona) {
+    const tone = personaInstruction(persona);
+    return tone ? `${SYSTEM_PROMPT}\n\n${tone}` : SYSTEM_PROMPT;
+  }
+
   return {
     /**
      * Start a streamed answer. Returns the SDK message stream so the caller
      * can forward `text` events and await the final message.
      *
-     * @param {{ question: string, context?: { question: string, answer: string }[] }} params
+     * @param {{ question: string, context?: { question: string, answer: string }[], persona?: { preset?: string, custom?: string } }} params
      */
-    streamAnswer({ question, context }) {
+    streamAnswer({ question, context, persona }) {
       return client.messages.stream({
         model: config.model,
         max_tokens: config.maxAnswerTokens,
-        system: SYSTEM_PROMPT,
+        system: buildSystemPrompt(persona),
         messages: [{ role: "user", content: buildMessage(context, question) }],
       });
     },
@@ -65,9 +78,9 @@ export function createClaudeService(client = new Anthropic()) {
      * text — Claude reads whatever question is shown in the image directly
      * (native vision support, no separate OCR step) and answers it.
      *
-     * @param {{ imageBase64: string, mediaType: string, context?: { question: string, answer: string }[] }} params
+     * @param {{ imageBase64: string, mediaType: string, context?: { question: string, answer: string }[], persona?: { preset?: string, custom?: string } }} params
      */
-    streamAnswerFromImage({ imageBase64, mediaType, context }) {
+    streamAnswerFromImage({ imageBase64, mediaType, context, persona }) {
       const background = backgroundBlock(context);
       const content = [
         ...(background ? [{ type: "text", text: background }] : []),
@@ -81,7 +94,7 @@ export function createClaudeService(client = new Anthropic()) {
       return client.messages.stream({
         model: config.model,
         max_tokens: config.maxAnswerTokens,
-        system: SYSTEM_PROMPT,
+        system: buildSystemPrompt(persona),
         messages: [{ role: "user", content }],
       });
     },

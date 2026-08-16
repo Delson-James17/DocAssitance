@@ -5,6 +5,17 @@ import {
   UI_OPACITY_RANGE,
   type Appearance,
 } from "../hooks/useAppearance";
+import type { PersonaPreset } from "../lib/api";
+
+const PERSONA_OPTIONS: { value: PersonaPreset; label: string }[] = [
+  { value: "default", label: "Default" },
+  { value: "professional", label: "Professional" },
+  { value: "friendly", label: "Friendly" },
+  { value: "jolly", label: "Jolly" },
+  { value: "custom", label: "Custom" },
+];
+
+type WindowMaterial = "acrylic" | "clear";
 
 interface SettingsProps {
   open: boolean;
@@ -16,6 +27,14 @@ interface SettingsProps {
   onTextColor: (value: string | null) => void;
   onBgColor: (value: string | null) => void;
   onReset: () => void;
+  /** Whether this is the desktop app, where a native window exists to blur. */
+  desktopAvailable: boolean;
+  windowMaterial: WindowMaterial;
+  onWindowMaterial: (material: WindowMaterial) => void;
+  personaPreset: PersonaPreset;
+  personaCustom: string;
+  onPersonaPreset: (preset: PersonaPreset) => void;
+  onPersonaCustom: (custom: string) => void;
 }
 
 /**
@@ -54,6 +73,13 @@ export function Settings({
   onTextColor,
   onBgColor,
   onReset,
+  desktopAvailable,
+  windowMaterial,
+  onWindowMaterial,
+  personaPreset,
+  personaCustom,
+  onPersonaPreset,
+  onPersonaCustom,
 }: SettingsProps) {
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -181,6 +207,33 @@ export function Settings({
         opaque backdrop, so these mainly change how the panels sit against it.
       </p>
 
+      <div className="settings-row">
+        <span className="settings-label">Window blur</span>
+        <div className="settings-colors">
+          <button
+            type="button"
+            className={`theme-toggle settings-btn${windowMaterial === "acrylic" ? " on" : ""}`}
+            disabled={!desktopAvailable}
+            onClick={() => onWindowMaterial("acrylic")}
+          >
+            Frosted
+          </button>
+          <button
+            type="button"
+            className={`theme-toggle settings-btn${windowMaterial === "clear" ? " on" : ""}`}
+            disabled={!desktopAvailable}
+            onClick={() => onWindowMaterial("clear")}
+          >
+            Clear
+          </button>
+        </div>
+        <span className="settings-hint">
+          {desktopAvailable
+            ? "Frosted blurs the desktop behind the window (Windows' fixed Acrylic blur — not adjustable). Clear shows it through sharp, with no blur at all. Switching rebuilds the window, so it'll flash briefly."
+            : "Desktop-only — the browser build has no native window to blur."}
+        </span>
+      </div>
+
       <label className="settings-toggle">
         <input
           type="checkbox"
@@ -197,6 +250,36 @@ export function Settings({
           </span>
         </span>
       </label>
+
+      <div className="settings-row">
+        <span className="settings-label">AI answer style</span>
+        <div className="settings-colors">
+          {PERSONA_OPTIONS.map(({ value, label }) => (
+            <button
+              key={value}
+              type="button"
+              className={`theme-toggle settings-btn${personaPreset === value ? " on" : ""}`}
+              onClick={() => onPersonaPreset(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {personaPreset === "custom" ? (
+          <textarea
+            className="edit-input qa-answer-input"
+            placeholder='e.g. "Answer like a calm, no-nonsense senior engineer" or "Keep it playful and a bit sarcastic"'
+            value={personaCustom}
+            maxLength={300}
+            rows={3}
+            onChange={(e) => onPersonaCustom(e.target.value)}
+          />
+        ) : null}
+        <span className="settings-hint">
+          Shapes the tone Claude answers in — Default leaves its own natural
+          voice alone. Doesn't change what it says, just how it says it.
+        </span>
+      </div>
 
       <button className="link-btn" onClick={onReset} disabled={isDefault}>
         Reset to default

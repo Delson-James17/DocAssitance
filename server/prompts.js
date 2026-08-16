@@ -9,3 +9,31 @@ Rules:
 - Keep answers short and conversational — they stream to the screen while the user is asking.
 - Get to the point in the first sentence. Add a supporting detail only if it helps.
 - Do not include exploratory reasoning or meta-commentary; respond with the final answer only.`;
+
+// Named tone presets the Settings panel offers, plus "custom" for free-text.
+// Wording lives here rather than duplicated client-side, so there's one place
+// that defines what each preset actually means.
+export const PERSONA_PRESETS = {
+  professional: "Answer in a professional, polished tone — measured, confident, and businesslike. Avoid slang and casual filler.",
+  friendly: "Answer in a warm, friendly, approachable tone, like talking to someone you like and trust — still clear and to the point.",
+  jolly: "Answer in an upbeat, jolly, high-energy tone — enthusiastic and positive, with a light, natural touch of humor where it fits.",
+};
+
+const MAX_CUSTOM_PERSONA_LENGTH = 300;
+
+/**
+ * Resolves a client-supplied persona choice into the instruction line to
+ * append to SYSTEM_PROMPT, or "" for the default tone (no addition — the
+ * base prompt's own voice is left alone).
+ *
+ * @param {{ preset?: string, custom?: string }} persona
+ * @returns {string}
+ */
+export function personaInstruction(persona) {
+  const preset = (persona?.preset ?? "default").toString();
+  if (preset === "custom") {
+    const custom = (persona?.custom ?? "").toString().trim().slice(0, MAX_CUSTOM_PERSONA_LENGTH);
+    return custom ? `Answer following this behavior/style instruction from the user: ${custom}` : "";
+  }
+  return PERSONA_PRESETS[preset] ?? "";
+}

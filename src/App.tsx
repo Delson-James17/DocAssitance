@@ -6,7 +6,7 @@ import { useAppearance } from "./hooks/useAppearance";
 import { useQa } from "./hooks/useQa";
 import { useSpeechRecognition } from "./hooks/useSpeechRecognition";
 import { useTheme } from "./hooks/useTheme";
-import { askQuestion, askScreenshot as askScreenshotApi } from "./lib/api";
+import { askQuestion, askScreenshot as askScreenshotApi, type Persona, type PersonaPreset } from "./lib/api";
 import { DUPLICATE_THRESHOLD, similarity } from "./lib/dedupe";
 import { findRelatedContext, matchSavedQa } from "./lib/qaMatch";
 import { downloadQaTranscript, downloadTranscript } from "./lib/transcript";
@@ -30,7 +30,11 @@ interface DesktopWindow {
   /** @returns whether the window is now pinned on top */
   togglePin: () => Promise<boolean>;
   setContentProtection: (enabled: boolean) => Promise<ContentProtectionResult>;
+  getMaterial: () => Promise<WindowMaterial>;
+  setMaterial: (material: WindowMaterial) => Promise<WindowMaterial>;
 }
+
+type WindowMaterial = "acrylic" | "clear";
 
 interface ContentProtectionResult {
   ok: boolean;
@@ -102,6 +106,18 @@ export default function App() {
     });
   }, [hiddenFromSharing]);
 
+  // Window blur mode (desktop-only): "acrylic" frosts the desktop behind the
+  // window, "clear" shows it through unblurred. Read from the main process
+  // rather than localStorage, since it's the main process — not this
+  // renderer — that owns the choice (the window has to be built with it).
+  const [windowMaterial, setWindowMaterialState] = useState<WindowMaterial>("clear");
+  useEffect(() => {
+    void desktopWindow?.getMaterial().then(setWindowMaterialState);
+  }, []);
+  const setWindowMaterial = useCallback((material: WindowMaterial) => {
+    void desktopWindow?.setMaterial(material).then(setWindowMaterialState);
+  }, []);
+
   // Persisted kill switch: when off, no question ever reaches the Claude
   // API, so it's a hard guarantee against burning tokens, not just a UI
   // nicety. Defaults on; only saved to localStorage once the user flips it.
@@ -115,6 +131,26 @@ export default function App() {
       return next;
     });
   }, []);
+
+  // How Claude's answers should sound — a preset tone, or "custom" free-text
+  // behavior instructions. Sent with every question (see ask/askScreenshot
+  // below); the actual wording for each preset lives server-side
+  // (server/prompts.js) so there's one source of truth for what each means.
+  const [personaPreset, setPersonaPreset] = useState<PersonaPreset>(
+    () => (localStorage.getItem("personaPreset") as PersonaPreset | null) ?? "default",
+  );
+  const [personaCustom, setPersonaCustomState] = useState<string>(
+    () => localStorage.getItem("personaCustom") ?? "",
+  );
+  const setPersona = useCallback((preset: PersonaPreset) => {
+    setPersonaPreset(preset);
+    localStorage.setItem("personaPreset", preset);
+  }, []);
+  const setPersonaCustom = useCallback((custom: string) => {
+    setPersonaCustomState(custom);
+    localStorage.setItem("personaCustom", custom);
+  }, []);
+  const persona: Persona = { preset: personaPreset, custom: personaCustom };
 
   // Which device speech is captured from. "headset" loops back system audio
   // (see systemAudio.ts) — it only works cleanly with headphones, since
@@ -232,9 +268,10 @@ export default function App() {
           onError: (message) => patchQa(id, { pending: false, error: message }),
         },
         context,
+        persona,
       );
     },
-    [aiEnabled, qa.entries, pushQa, patchQa],
+    [aiEnabled, qa.entries, pushQa, patchQa, persona],
   );
 
   // A question read visually (a shared doc, a coding platform, a slide)
@@ -276,18 +313,23 @@ export default function App() {
         source: "claude",
       });
 
-      void askScreenshotApi(result.dataUrl, {
-        onDelta: (text) =>
-          setRecord((prev) =>
-            prev.map((e) =>
-              e.id === id && e.kind === "qa" ? { ...e, answer: e.answer + text } : e,
+      void askScreenshotApi(
+        result.dataUrl,
+        {
+          onDelta: (text) =>
+            setRecord((prev) =>
+              prev.map((e) =>
+                e.id === id && e.kind === "qa" ? { ...e, answer: e.answer + text } : e,
+              ),
             ),
-          ),
-        onDone: (answer) => patchQa(id, { pending: false, answer }),
-        onError: (message) => patchQa(id, { pending: false, error: message }),
-      });
+          onDone: (answer) => patchQa(id, { pending: false, answer }),
+          onError: (message) => patchQa(id, { pending: false, error: message }),
+        },
+        [],
+        persona,
+      );
     })();
-  }, [aiEnabled, pushQa, patchQa]);
+  }, [aiEnabled, pushQa, patchQa, persona]);
 
   // The most recent answer shown, so it can be recognised if it's read back
   // out loud. See the echo check in onFinalUtterance.
@@ -422,6 +464,7 @@ export default function App() {
             className={`theme-toggle settings-btn${pinned ? " on" : ""}`}
             onClick={togglePin}
             disabled={!desktopWindow}
+            aria-label="Move"
             title={
               desktopWindow
                 ? pinned
@@ -430,7 +473,7 @@ export default function App() {
                 : "Move is desktop-only — the browser build has no window to pin"
             }
           >
-            📌 Move
+            📌
           </button>
           <button
             className={`theme-toggle settings-btn${hiddenFromSharing ? " on" : ""}`}
@@ -521,6 +564,13 @@ export default function App() {
       onTextColor={setTextColor}
       onBgColor={setBgColor}
       onReset={resetAppearance}
+      desktopAvailable={Boolean(desktopWindow)}
+      windowMaterial={windowMaterial}
+      onWindowMaterial={setWindowMaterial}
+      personaPreset={personaPreset}
+      personaCustom={personaCustom}
+      onPersonaPreset={setPersona}
+      onPersonaCustom={setPersonaCustom}
     />
     </>
   );

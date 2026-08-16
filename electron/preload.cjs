@@ -35,6 +35,15 @@ contextBridge.exposeInMainWorld("desktop", {
     /** Requests Windows capture exclusion without hiding the local window. */
     setContentProtection: (enabled) =>
       ipcRenderer.invoke("window:set-content-protection", enabled),
+    /**
+     * Window blur mode: "acrylic" (frosted glass) or "clear" (sharp
+     * passthrough, no blur). Switching rebuilds the native window, so expect
+     * a brief flash while the new one replaces the old.
+     * @returns {Promise<"acrylic" | "clear">}
+     */
+    getMaterial: () => ipcRenderer.invoke("window:get-material"),
+    /** @returns {Promise<"acrylic" | "clear">} the material that's now active */
+    setMaterial: (material) => ipcRenderer.invoke("window:set-material", material),
   },
 
   // Screenshot question: captures the screen so a question shown visually

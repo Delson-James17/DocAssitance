@@ -15,7 +15,7 @@ function getInitialTheme(): Theme {
   if (stored === "dark" || stored === "light" || stored === "transparent") return stored;
 
   // The desktop window is built for this one: it's the only theme that lets
-  // the acrylic behind the window show through, and it's the reason the
+  // the real desktop behind the window show through, and it's the reason the
   // window is translucent in the first place. Starting anywhere else means
   // the app looks like a plain opaque window until you find the toggle.
   if ((window as unknown as { desktop?: unknown }).desktop) return "transparent";

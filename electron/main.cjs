@@ -72,6 +72,41 @@ let httpServer = null;
 
 const whisper = createWhisper({ isPackaged: app.isPackaged, rootDir });
 
+// --- Window blur mode ------------------------------------------------------
+// "clear" = transparent: true (sharp passthrough, no blur — see createWindow).
+// "acrylic" = backgroundMaterial: "acrylic" (Windows' frosted-glass blur).
+// The two are mutually exclusive Windows/Electron options, and `transparent`
+// can't be flipped on a live window — switching modes means destroying the
+// window and creating a new one (see ipcMain "window:set-material" below).
+// Persisted to a small file rather than passed through the renderer's
+// localStorage, since the choice has to be known *before* the window (and
+// therefore the renderer) exists.
+function materialFilePath() {
+  return path.join(app.getPath("userData"), "window-material.json");
+}
+
+function loadMaterial() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(materialFilePath(), "utf8"));
+    return raw.material === "acrylic" ? "acrylic" : "clear";
+  } catch {
+    return "clear";
+  }
+}
+
+function saveMaterial(material) {
+  try {
+    fs.writeFileSync(materialFilePath(), JSON.stringify({ material }));
+  } catch (err) {
+    console.warn("[desktop] could not save window blur preference:", err.message);
+  }
+}
+
+let windowMaterial = "clear";
+/** @type {import("electron").BrowserWindow | null} */
+let mainWindow = null;
+let appUrl = "";
+
 /**
  * Starts the Express app on a random free port, bound to the loopback
  * interface only. The web build's `app.listen(port)` binds 0.0.0.0, which
@@ -99,7 +134,16 @@ async function startServer() {
   });
 }
 
-function createWindow(url) {
+function createWindow(url, material) {
+  // `transparent: true` and `backgroundMaterial` are mutually exclusive on
+  // Windows, so which one gets passed below decides the whole window's blur
+  // behaviour: true passthrough (desktop shows through crisp, unblurred) vs
+  // Acrylic (Windows' frosted glass, a fixed blur radius the OS controls —
+  // there's no API to dial it to anything in between). "clear" loses edge
+  // hit-testing by default (see the WM_NCHITTEST hook below), which is what
+  // restores drag-to-resize for it.
+  const isClear = material !== "acrylic";
+
   const win = new BrowserWindow({
     width: 1280,
     height: 860,
@@ -110,22 +154,12 @@ function createWindow(url) {
     // the way any browser window can.
     minWidth: 380,
     minHeight: 420,
-    // A fully transparent window is deliberately NOT used here. On Windows,
-    // `transparent: true` and `backgroundMaterial` are mutually exclusive —
-    // a transparent window silently disables acrylic, leaving a clear window
-    // with no blur at all (and, on Windows, one that can't be resized by
-    // dragging its edges).
-    //
-    // Acrylic is the real Windows 11 glass: the desktop behind the window is
-    // blurred and tinted by the compositor. CSS backdrop-filter cannot do
-    // this — it only blurs what the page itself painted.
-    //
-    // An alpha-zero background colour is what lets the material show through
+    // An alpha-zero background colour is what lets the desktop show through
     // wherever the page doesn't paint. The Glass theme makes <body>
-    // transparent (src/index.css) so the acrylic is visible; the Dark and
+    // transparent (src/index.css) so the desktop is visible; the Dark and
     // Light themes paint an opaque backdrop over it.
     backgroundColor: "#00000000",
-    backgroundMaterial: "acrylic",
+    ...(isClear ? { transparent: true } : { backgroundMaterial: "acrylic" }),
     // The app already draws its own title bar and window buttons, so drop the
     // native frame and the default File/Edit menu rather than showing two
     // sets of chrome stacked on top of each other.
@@ -147,6 +181,44 @@ function createWindow(url) {
       backgroundThrottling: false,
     },
   });
+
+  // A transparent BrowserWindow's default edge hit-testing on Windows treats
+  // the whole frame as "client area", so dragging the border does nothing —
+  // there's no native frame left for Windows to hit-test a resize against.
+  // This restores it manually: WM_NCHITTEST fires on every mouse-over, and
+  // classifying the cursor's position against the window's edges (via
+  // setNextHitTest) is what makes Windows offer its normal resize cursor and
+  // drag-to-resize there, same as any framed window gets for free. Acrylic
+  // mode doesn't need this — only `transparent: true` breaks the default.
+  if (isClear && process.platform === "win32") {
+    try {
+      const EDGE = 8; // px from the border that still counts as a resize grab
+      win.hookWindowMessage(0x0084 /* WM_NCHITTEST */, () => {
+        const cursor = screen.getCursorScreenPoint();
+        const { x, y, width, height } = win.getBounds();
+        const left = cursor.x - x;
+        const top = cursor.y - y;
+        const right = width - left;
+        const bottom = height - top;
+
+        const nearLeft = left <= EDGE;
+        const nearRight = right <= EDGE;
+        const nearTop = top <= EDGE;
+        const nearBottom = bottom <= EDGE;
+
+        if (nearTop && nearLeft) win.setNextHitTest("topleft");
+        else if (nearTop && nearRight) win.setNextHitTest("topright");
+        else if (nearBottom && nearLeft) win.setNextHitTest("bottomleft");
+        else if (nearBottom && nearRight) win.setNextHitTest("bottomright");
+        else if (nearLeft) win.setNextHitTest("left");
+        else if (nearRight) win.setNextHitTest("right");
+        else if (nearTop) win.setNextHitTest("top");
+        else if (nearBottom) win.setNextHitTest("bottom");
+      });
+    } catch (err) {
+      console.error("[desktop] could not hook edge resize for the clear window:", err);
+    }
+  }
 
   // Privacy-first default: on supported Windows versions this requests
   // WDA_EXCLUDEFROMCAPTURE before the window is shown. The window is still
@@ -267,6 +339,32 @@ if (!app.requestSingleInstanceLock()) {
     return alwaysOnTopManual;
   });
 
+  // --- Window blur mode: Acrylic (frosted) vs Clear (sharp passthrough) ----
+  // `transparent` can't be toggled on a live BrowserWindow, so switching
+  // modes tears down the current window and builds a new one in its place,
+  // carrying over its size/position/maximized state so it doesn't jump.
+  ipcMain.handle("window:get-material", () => windowMaterial);
+
+  ipcMain.handle("window:set-material", (_event, material) => {
+    if (material !== "acrylic" && material !== "clear") return windowMaterial;
+    windowMaterial = material;
+    saveMaterial(material);
+    if (!appUrl) return windowMaterial;
+
+    const old = mainWindow;
+    const bounds = old?.getBounds();
+    const wasMaximized = old?.isMaximized() ?? false;
+
+    const next = createWindow(appUrl, windowMaterial);
+    if (bounds) next.setBounds(bounds);
+    if (wasMaximized) next.maximize();
+    applyAlwaysOnTop(next);
+    next.once("ready-to-show", () => old?.destroy());
+    mainWindow = next;
+
+    return windowMaterial;
+  });
+
   // Electron maps this to SetWindowDisplayAffinity on Windows. Modern
   // Windows 10/11 use WDA_EXCLUDEFROMCAPTURE; older Windows releases and
   // some capture programs may not honour it, so this is a best-effort request.
@@ -379,11 +477,16 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(async () => {
     loadEnv();
-    const url = isDev ? DEV_SERVER_URL : await startServer();
-    applyAlwaysOnTop(createWindow(url));
+    windowMaterial = loadMaterial();
+    appUrl = isDev ? DEV_SERVER_URL : await startServer();
+    mainWindow = createWindow(appUrl, windowMaterial);
+    applyAlwaysOnTop(mainWindow);
 
     app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) applyAlwaysOnTop(createWindow(url));
+      if (BrowserWindow.getAllWindows().length === 0) {
+        mainWindow = createWindow(appUrl, windowMaterial);
+        applyAlwaysOnTop(mainWindow);
+      }
     });
   });
 

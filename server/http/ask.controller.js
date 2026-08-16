@@ -54,6 +54,24 @@ function cleanImage(raw) {
   return { mediaType, data };
 }
 
+const PERSONA_PRESET_KEYS = new Set(["default", "professional", "friendly", "jolly", "custom"]);
+
+/**
+ * The tone preset (and optional custom text) chosen in Settings. An unknown
+ * preset falls back to "default" rather than erroring — this only ever
+ * changes phrasing, never a rule the app depends on, so failing soft here
+ * beats failing an otherwise-fine question over it.
+ *
+ * @param {unknown} raw
+ */
+function cleanPersona(raw) {
+  const preset = (raw?.preset ?? "default").toString();
+  return {
+    preset: PERSONA_PRESET_KEYS.has(preset) ? preset : "default",
+    custom: (raw?.custom ?? "").toString(),
+  };
+}
+
 /**
  * HTTP handler that answers a question — typed/spoken text, or a screenshot
  * — from Claude's general knowledge, and streams the answer back as
@@ -85,6 +103,7 @@ export function createAskController({ claude }) {
     }
 
     const context = cleanContext(req.body?.context);
+    const persona = cleanPersona(req.body?.persona);
 
     const sse = initSse(res);
     try {
@@ -93,8 +112,9 @@ export function createAskController({ claude }) {
             imageBase64: image.data,
             mediaType: image.mediaType,
             context,
+            persona,
           })
-        : claude.streamAnswer({ question, context });
+        : claude.streamAnswer({ question, context, persona });
       stream.on("text", (delta) => sse.send("delta", { text: delta }));
 
       const final = await stream.finalMessage();

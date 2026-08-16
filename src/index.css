@@ -347,6 +347,11 @@ body {
   right: 14px;
   z-index: 20;
   width: 280px;
+  /* Keeps the panel on-screen (and its bottom rows reachable) once its
+     content grows taller than the window — it only ever grew in one
+     direction as settings were added, with nothing capping it. */
+  max-height: calc(100vh - 60px);
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
@@ -372,6 +377,11 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+}
+.settings-row textarea.edit-input {
+  width: 100%;
+  font-family: inherit;
+  resize: vertical;
 }
 .settings-label {
   display: flex;
