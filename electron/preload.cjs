@@ -36,6 +36,15 @@ contextBridge.exposeInMainWorld("desktop", {
     setContentProtection: (enabled) =>
       ipcRenderer.invoke("window:set-content-protection", enabled),
     /**
+     * Hold-Shift-to-click-through: fades the window out and passes clicks to
+     * whatever's behind it. Restores the instant Shift is physically
+     * released, even after clicking into another app moves keyboard focus
+     * away — main.cjs polls Windows' real key state (GetAsyncKeyState) for
+     * this rather than relying only on this renderer's own keyup, which
+     * would otherwise never fire once focus is gone.
+     */
+    setClickThrough: (enabled) => ipcRenderer.invoke("window:set-clickthrough", enabled),
+    /**
      * Window blur mode: "acrylic" (frosted glass) or "clear" (sharp
      * passthrough, no blur). Switching rebuilds the native window, so expect
      * a brief flash while the new one replaces the old.
@@ -44,6 +53,15 @@ contextBridge.exposeInMainWorld("desktop", {
     getMaterial: () => ipcRenderer.invoke("window:get-material"),
     /** @returns {Promise<"acrylic" | "clear">} the material that's now active */
     setMaterial: (material) => ipcRenderer.invoke("window:set-material", material),
+    /**
+     * Manual resize support for Clear mode, where the window is transparent
+     * and Windows won't hit-test a drag on its border on its own (see
+     * main.cjs). getBounds/setBounds are the two primitives
+     * ResizeHandles.tsx drives from a pointer-capture drag.
+     * @returns {Promise<{ x: number, y: number, width: number, height: number } | null>}
+     */
+    getBounds: () => ipcRenderer.invoke("window:get-bounds"),
+    setBounds: (bounds) => ipcRenderer.invoke("window:set-bounds", bounds),
   },
 
   // Screenshot question: captures the screen so a question shown visually

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Console } from "./components/Console";
 import { QaPanel } from "./components/QaPanel";
+import { ResizeHandles } from "./components/ResizeHandles";
 import { Settings } from "./components/Settings";
 import { useAppearance } from "./hooks/useAppearance";
 import { useQa } from "./hooks/useQa";
@@ -32,6 +33,9 @@ interface DesktopWindow {
   setContentProtection: (enabled: boolean) => Promise<ContentProtectionResult>;
   getMaterial: () => Promise<WindowMaterial>;
   setMaterial: (material: WindowMaterial) => Promise<WindowMaterial>;
+  getBounds: () => Promise<{ x: number; y: number; width: number; height: number } | null>;
+  setBounds: (bounds: { x: number; y: number; width: number; height: number }) => Promise<void>;
+  setClickThrough: (enabled: boolean) => Promise<void>;
 }
 
 type WindowMaterial = "acrylic" | "clear";
@@ -380,9 +384,18 @@ export default function App() {
   // pushing it
   // into the record and mini boxes exactly like a live saved-Q&A match
   // would — a manual override for the questions you most need on hand in
-  // case voice or typing lets you down. Ignored while focus is in any
-  // editable field so normal typing (the command bar, the Saved Q&A forms)
-  // is never hijacked.
+  // case voice or typing lets you down. Up/Down scroll the conversation log;
+  // [ and ] switch the window blur mode (Frosted/Clear, same as the Settings
+  // toggle); a bare tap of Ctrl (pressed and released with no other key
+  // meanwhile) takes a screenshot — Fn itself can't be used for this: on
+  // essentially every laptop keyboard, Fn is handled entirely by the
+  // keyboard's own firmware and never reaches Windows (or any app) as a real
+  // keypress. Holding Shift makes the window click-through so whatever's
+  // behind it can be clicked, restoring the moment Shift is released (see
+  // window:set-clickthrough in main.cjs for how that survives a click
+  // during the hold sending focus elsewhere first). Ignored while focus is
+  // in any editable field so normal typing (the command bar, the Saved Q&A
+  // forms) is never hijacked.
   useEffect(() => {
     function isEditableTarget(target: EventTarget | null): boolean {
       if (!(target instanceof HTMLElement)) return false;
@@ -390,12 +403,51 @@ export default function App() {
       return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
     }
 
+    // True only while Control is down and nothing else has been pressed
+    // alongside it yet — a normal Ctrl+C/Ctrl+V still works untouched,
+    // since the moment that second key lands this flips false and the
+    // keyup never fires the screenshot.
+    let ctrlTap = false;
+
     function onKeyDown(e: KeyboardEvent) {
-      if (isEditableTarget(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isEditableTarget(e.target)) return;
+
+      if (e.key === "Control") {
+        if (!e.repeat) ctrlTap = true;
+        return;
+      }
+      ctrlTap = false;
+
+      // Hold Shift to click through the window to whatever's behind it —
+      // see window:set-clickthrough in main.cjs for how it restores itself
+      // (Shift's own keyup below, or regaining focus as a fallback for when
+      // a click during the hold sends focus elsewhere first).
+      if (e.key === "Shift") {
+        if (!e.repeat) void desktopWindow?.setClickThrough(true);
+        return;
+      }
+
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
 
       if (e.key === "." || e.key === " ") {
         e.preventDefault();
         toggleListening();
+        return;
+      }
+      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        const el = document.querySelector<HTMLElement>(".scrollback");
+        if (el) {
+          e.preventDefault();
+          el.scrollBy({ top: e.key === "ArrowUp" ? -80 : 80, behavior: "smooth" });
+        }
+        return;
+      }
+      // Window blur mode — desktop-only, same as clicking Frosted/Clear in
+      // Settings (see setWindowMaterial above). A no-op in the browser build
+      // since setWindowMaterial itself no-ops without desktopWindow.
+      if (e.key === "[" || e.key === "]") {
+        e.preventDefault();
+        setWindowMaterial(e.key === "[" ? "acrylic" : "clear");
         return;
       }
       // Case-insensitive: an entry assigned "q" answers to Q as well, so a
@@ -410,9 +462,87 @@ export default function App() {
       }
     }
 
+    function onKeyUp(e: KeyboardEvent) {
+      if (e.key === "Shift") {
+        void desktopWindow?.setClickThrough(false);
+        return;
+      }
+      if (e.key !== "Control") return;
+      const wasTap = ctrlTap;
+      ctrlTap = false;
+      if (wasTap && !isEditableTarget(document.activeElement)) askScreenshot();
+    }
+
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [qa.entries, toggleListening, pushQa]);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, [qa.entries, toggleListening, pushQa, askScreenshot, setWindowMaterial]);
+
+  // Right-click-drag to move the window from anywhere (desktop only) — the
+  // title bar's own drag region (see .title-bar in index.css) only answers
+  // to the left button and isn't always reachable once the window is small
+  // or sitting over content you still need to click through to. Reuses the
+  // same getBounds/setBounds bridge ResizeHandles.tsx drives; unlike that
+  // component this doesn't need pointer capture on a specific element,
+  // since the drag is already tracked at the window level regardless of
+  // what's under the cursor.
+  useEffect(() => {
+    if (!desktopWindow) return;
+
+    function isEditableTarget(target: EventTarget | null): boolean {
+      if (!(target instanceof HTMLElement)) return false;
+      const tag = target.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
+    }
+
+    let dragStart: { x: number; y: number; width: number; height: number } | null = null;
+    let startX = 0;
+    let startY = 0;
+
+    function onPointerDown(e: PointerEvent) {
+      if (e.button !== 2 || isEditableTarget(e.target)) return;
+      startX = e.screenX;
+      startY = e.screenY;
+      void desktopWindow!.getBounds().then((bounds) => {
+        if (bounds) dragStart = bounds;
+      });
+    }
+
+    function onPointerMove(e: PointerEvent) {
+      if (!dragStart) return;
+      void desktopWindow!.setBounds({
+        x: dragStart.x + (e.screenX - startX),
+        y: dragStart.y + (e.screenY - startY),
+        width: dragStart.width,
+        height: dragStart.height,
+      });
+    }
+
+    function onPointerUp(e: PointerEvent) {
+      if (e.button === 2) dragStart = null;
+    }
+
+    // The right-click context menu would otherwise pop up the instant the
+    // drag starts — left alone over editable fields, so right-click paste
+    // still works in the command bar.
+    function onContextMenu(e: MouseEvent) {
+      if (!isEditableTarget(e.target)) e.preventDefault();
+    }
+
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("contextmenu", onContextMenu);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("contextmenu", onContextMenu);
+    };
+  }, []);
 
   const busy = record.some((e) => e.kind === "qa" && e.pending);
 
@@ -428,6 +558,9 @@ export default function App() {
 
   return (
     <>
+    {desktopWindow && windowMaterial === "clear" ? (
+      <ResizeHandles desktopWindow={desktopWindow} />
+    ) : null}
     <div className="term-app">
       <div className="title-bar">
         <span className="title-text">

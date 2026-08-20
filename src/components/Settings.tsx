@@ -229,7 +229,7 @@ export function Settings({
         </div>
         <span className="settings-hint">
           {desktopAvailable
-            ? "Frosted blurs the desktop behind the window (Windows' fixed Acrylic blur — not adjustable). Clear shows it through sharp, with no blur at all. Switching rebuilds the window, so it'll flash briefly."
+            ? "Frosted blurs the desktop behind the window (Windows' fixed Acrylic blur — not adjustable). Clear shows it through sharp, with no blur at all. Switching rebuilds the window, so it'll flash briefly. Shortcut: [ for Frosted, ] for Clear."
             : "Desktop-only — the browser build has no native window to blur."}
         </span>
       </div>

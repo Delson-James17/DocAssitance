@@ -168,6 +168,12 @@ body {
 
 * {
   box-sizing: border-box;
+  /* Plain arrow everywhere, including over selectable text — the browser's
+     default I-beam cursor there is purely cosmetic and doesn't affect
+     click-drag selecting or copying text, which still works exactly the
+     same. Buttons/links below get this same explicit "default" instead of
+     "pointer" so hovering them shows the arrow too, not a hand. */
+  cursor: default;
 }
 
 ::selection {
@@ -317,12 +323,75 @@ body {
 .win-controls {
   -webkit-app-region: no-drag;
 }
+
+/* ---------- Manual resize handles (Clear window-blur mode; ResizeHandles.tsx) ---------- */
+/* Invisible strips at the true window edges — see the component for why
+   these exist instead of relying on Windows' (broken, for a transparent
+   window) native border hit-testing. */
+.resize-handle {
+  position: fixed;
+  z-index: 50;
+  -webkit-app-region: no-drag;
+}
+.resize-n,
+.resize-s {
+  left: 10px;
+  right: 10px;
+  height: 6px;
+  cursor: ns-resize;
+}
+.resize-n {
+  top: 0;
+}
+.resize-s {
+  bottom: 0;
+}
+.resize-e,
+.resize-w {
+  top: 10px;
+  bottom: 10px;
+  width: 6px;
+  cursor: ew-resize;
+}
+.resize-e {
+  right: 0;
+}
+.resize-w {
+  left: 0;
+}
+.resize-ne,
+.resize-nw,
+.resize-se,
+.resize-sw {
+  width: 14px;
+  height: 14px;
+}
+.resize-ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+.resize-nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+.resize-se {
+  bottom: 0;
+  right: 0;
+  cursor: nwse-resize;
+}
+.resize-sw {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
 .theme-toggle {
   background: var(--fill);
   border: 1px solid var(--stroke);
   border-radius: 999px;
   color: var(--muted);
-  cursor: pointer;
+  cursor: default;
   font: inherit;
   font-size: 0.75rem;
   padding: 0.2rem 0.7rem;
@@ -404,7 +473,7 @@ body {
 .settings-panel input[type="range"] {
   width: 100%;
   accent-color: var(--green);
-  cursor: pointer;
+  cursor: default;
 }
 .settings-panel .link-btn {
   align-self: flex-start;
@@ -421,7 +490,7 @@ body {
   gap: 0.35rem;
   font-size: 0.72rem;
   color: var(--text);
-  cursor: pointer;
+  cursor: default;
 }
 /* Native colour inputs come with a chunky bevelled frame; strip it back to a
    plain swatch that matches the rest of the panel. */
@@ -432,7 +501,7 @@ body {
   border: 1px solid var(--stroke-bright);
   border-radius: var(--radius-sm);
   background: transparent;
-  cursor: pointer;
+  cursor: default;
 }
 .settings-color input[type="color"]::-webkit-color-swatch-wrapper {
   padding: 2px;
@@ -450,12 +519,12 @@ body {
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
-  cursor: pointer;
+  cursor: default;
 }
 .settings-toggle input {
   margin-top: 0.15rem;
   accent-color: var(--green);
-  cursor: pointer;
+  cursor: default;
   flex-shrink: 0;
 }
 .settings-toggle > span {
@@ -518,7 +587,7 @@ body {
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  cursor: pointer;
+  cursor: default;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
 .win-controls button.close:hover {
@@ -599,7 +668,7 @@ body {
   border: 1px solid var(--stroke);
   border-radius: var(--radius-sm);
   color: var(--muted);
-  cursor: pointer;
+  cursor: default;
   font: inherit;
   font-size: 0.78rem;
   padding: 0.25rem 0.65rem;
@@ -637,7 +706,7 @@ body {
   font: inherit;
   font-size: 0.8rem;
   padding: 0.3rem 0.7rem;
-  cursor: pointer;
+  cursor: default;
   white-space: nowrap;
   transition: background-color 0.15s ease, border-color 0.15s ease,
     color 0.15s ease, transform 0.1s ease;
@@ -811,7 +880,7 @@ body {
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--muted);
-  cursor: pointer;
+  cursor: default;
   font: inherit;
   font-size: 0.78rem;
   padding: 0.2rem 0.05rem;
@@ -921,7 +990,7 @@ body {
   color: var(--green);
   border: 1px solid color-mix(in srgb, var(--green) 55%, transparent);
   font-size: 1rem;
-  cursor: pointer;
+  cursor: default;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1010,7 +1079,7 @@ body {
   font: inherit;
   font-size: 0.85rem;
   padding: 0.6rem 0.7rem;
-  cursor: pointer;
+  cursor: default;
   white-space: nowrap;
   transition: background-color 0.15s ease, border-color 0.15s ease,
     color 0.15s ease;
@@ -1102,7 +1171,7 @@ body {
   background: none;
   border: none;
   color: var(--muted);
-  cursor: pointer;
+  cursor: default;
   font: inherit;
   font-size: 0.78rem;
   padding: 0.1rem 0.25rem;

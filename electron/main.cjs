@@ -25,6 +25,37 @@ const { app, BrowserWindow, ipcMain, shell, desktopCapturer, screen } = require(
 const dotenv = require("dotenv");
 const { createWhisper } = require("./whisper.cjs");
 
+// --- Global Shift key state (for "hold Shift to click through") -----------
+// The whole point of window:set-clickthrough below is to let the user click
+// something *behind* this window — the moment they do, Windows moves
+// keyboard focus to that other app, and a normal DOM keyup listener in the
+// renderer can never fire again: keyboard events only reach whichever window
+// currently has focus. GetAsyncKeyState reads the key's real hardware state
+// straight from Windows, independent of focus entirely, which is the only
+// way to know Shift was released once focus has moved elsewhere. koffi is
+// N-API based (ABI-stable across Node/Electron versions), so this doesn't
+// need @electron/rebuild the way a version-specific native addon would.
+let isShiftPhysicallyDown = () => false;
+if (process.platform === "win32") {
+  try {
+    const koffi = require("koffi");
+    const user32 = koffi.load("user32.dll");
+    const GetAsyncKeyState = user32.func("__stdcall", "GetAsyncKeyState", "int16", ["int"]);
+    const VK_SHIFT = 0x10;
+    // The high bit (0x8000) of the result means "currently down". The
+    // return type is a signed 16-bit int, so a negative value already
+    // implies that bit is set — but the explicit mask is clearer than
+    // relying on that, and correct either way.
+    isShiftPhysicallyDown = () => (GetAsyncKeyState(VK_SHIFT) & 0x8000) !== 0;
+  } catch (err) {
+    console.warn(
+      "[desktop] could not load koffi/user32 for global Shift detection — " +
+        "click-through will only restore via keyup or refocus:",
+      err.message,
+    );
+  }
+}
+
 const rootDir = path.resolve(__dirname, "..");
 
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
@@ -106,6 +137,14 @@ let windowMaterial = "clear";
 /** @type {import("electron").BrowserWindow | null} */
 let mainWindow = null;
 let appUrl = "";
+/** @type {NodeJS.Timeout | null} */
+let clickThroughPoll = null;
+
+// Shared between createWindow's own minWidth/minHeight and the manual
+// resize-handle clamp below, so a Clear-mode drag can't shrink the window
+// past what Acrylic mode already enforces natively.
+const MIN_WINDOW_WIDTH = 380;
+const MIN_WINDOW_HEIGHT = 420;
 
 /**
  * Starts the Express app on a random free port, bound to the loopback
@@ -139,9 +178,9 @@ function createWindow(url, material) {
   // Windows, so which one gets passed below decides the whole window's blur
   // behaviour: true passthrough (desktop shows through crisp, unblurred) vs
   // Acrylic (Windows' frosted glass, a fixed blur radius the OS controls —
-  // there's no API to dial it to anything in between). "clear" loses edge
-  // hit-testing by default (see the WM_NCHITTEST hook below), which is what
-  // restores drag-to-resize for it.
+  // there's no API to dial it to anything in between). "clear" loses native
+  // edge-resize as a side effect — see the comment further down for how
+  // that's restored.
   const isClear = material !== "acrylic";
 
   const win = new BrowserWindow({
@@ -152,8 +191,8 @@ function createWindow(url, material) {
     // The layout collapses to a single column well below this (src/index.css),
     // so the window can be squeezed down beside whatever else is on screen,
     // the way any browser window can.
-    minWidth: 380,
-    minHeight: 420,
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
     // An alpha-zero background colour is what lets the desktop show through
     // wherever the page doesn't paint. The Glass theme makes <body>
     // transparent (src/index.css) so the desktop is visible; the Dark and
@@ -182,43 +221,27 @@ function createWindow(url, material) {
     },
   });
 
-  // A transparent BrowserWindow's default edge hit-testing on Windows treats
-  // the whole frame as "client area", so dragging the border does nothing —
-  // there's no native frame left for Windows to hit-test a resize against.
-  // This restores it manually: WM_NCHITTEST fires on every mouse-over, and
-  // classifying the cursor's position against the window's edges (via
-  // setNextHitTest) is what makes Windows offer its normal resize cursor and
-  // drag-to-resize there, same as any framed window gets for free. Acrylic
-  // mode doesn't need this — only `transparent: true` breaks the default.
-  if (isClear && process.platform === "win32") {
-    try {
-      const EDGE = 8; // px from the border that still counts as a resize grab
-      win.hookWindowMessage(0x0084 /* WM_NCHITTEST */, () => {
-        const cursor = screen.getCursorScreenPoint();
-        const { x, y, width, height } = win.getBounds();
-        const left = cursor.x - x;
-        const top = cursor.y - y;
-        const right = width - left;
-        const bottom = height - top;
+  // Removes the window's button from the Windows taskbar — Alt-Tab, the
+  // window itself, and every other way of reaching it are untouched, only
+  // the taskbar entry goes away. Lives in createWindow() (rather than being
+  // set once at startup) so it's reapplied automatically every time this
+  // function runs again — switching window-blur mode and reopening from
+  // "activate" both create a brand new BrowserWindow, which would otherwise
+  // silently regain a taskbar button.
+  win.setSkipTaskbar(true);
 
-        const nearLeft = left <= EDGE;
-        const nearRight = right <= EDGE;
-        const nearTop = top <= EDGE;
-        const nearBottom = bottom <= EDGE;
-
-        if (nearTop && nearLeft) win.setNextHitTest("topleft");
-        else if (nearTop && nearRight) win.setNextHitTest("topright");
-        else if (nearBottom && nearLeft) win.setNextHitTest("bottomleft");
-        else if (nearBottom && nearRight) win.setNextHitTest("bottomright");
-        else if (nearLeft) win.setNextHitTest("left");
-        else if (nearRight) win.setNextHitTest("right");
-        else if (nearTop) win.setNextHitTest("top");
-        else if (nearBottom) win.setNextHitTest("bottom");
-      });
-    } catch (err) {
-      console.error("[desktop] could not hook edge resize for the clear window:", err);
-    }
-  }
+  // A transparent BrowserWindow loses Windows' native edge hit-testing, so
+  // dragging the border does nothing — there's no frame left for Windows to
+  // resize against. (An earlier attempt to restore it via a WM_NCHITTEST
+  // hook called a `win.setNextHitTest` method that doesn't actually exist on
+  // BrowserWindow — that's not a real Electron API — and crashed the main
+  // process the moment the mouse moved over the window.) The real fix is in
+  // the renderer: src/components/ResizeHandles.tsx draws invisible edge/
+  // corner strips that drive `window:set-bounds` below directly, using
+  // pointer capture so the drag keeps tracking even once the cursor leaves
+  // the window's own client area. Acrylic mode doesn't need any of this —
+  // it isn't transparent, so Chromium's default frameless hit-testing (which
+  // only breaks under `transparent: true`) already handles it.
 
   // Privacy-first default: on supported Windows versions this requests
   // WDA_EXCLUDEFROMCAPTURE before the window is shown. The window is still
@@ -232,6 +255,33 @@ function createWindow(url, material) {
   }
 
   win.once("ready-to-show", () => win.show());
+
+  // Secondary safety net for "hold Shift to click through" (see
+  // window:set-clickthrough below) — the primary one is the GetAsyncKeyState
+  // poll started there, which restores the instant Shift is physically
+  // released regardless of focus. This one only matters if that poll
+  // somehow never ran (e.g. koffi failed to load, see isShiftPhysicallyDown
+  // above): regaining focus at all (Alt-Tab back, refocusing some other way)
+  // is a second guaranteed-to-fire signal. Harmless to call when the window
+  // was already visible/interactive — both calls are idempotent.
+  win.on("focus", () => {
+    win.setOpacity(1);
+    win.setIgnoreMouseEvents(false);
+    if (clickThroughPoll) {
+      clearInterval(clickThroughPoll);
+      clickThroughPoll = null;
+    }
+  });
+
+  // If the window is destroyed while the poll is still running (e.g. a
+  // blur-mode switch tears it down mid-hold), nothing else would ever clear
+  // this interval.
+  win.on("closed", () => {
+    if (clickThroughPoll) {
+      clearInterval(clickThroughPoll);
+      clickThroughPoll = null;
+    }
+  });
 
   // The mic prompt has no meaning here — there's no browser chrome to show
   // it in, and the user already granted the app permission at the OS level.
@@ -317,6 +367,80 @@ if (!app.requestSingleInstanceLock()) {
 
   ipcMain.handle("window:close", (event) => {
     BrowserWindow.fromWebContents(event.sender)?.close();
+  });
+
+  // --- "Hold Shift to click through" ----------------------------------------
+  // Fades the window out and lets clicks fall through to whatever's behind
+  // it, so a question shown underneath (or any other app) can be clicked
+  // without first moving or closing this one. Opacity + ignoreMouseEvents
+  // together, rather than hide()/show(): hiding drops the window from
+  // Alt-Tab and (worse) can hand focus somewhere unpredictable on the way
+  // back, where restoring via opacity never touches focus at all — the
+  // window reappears exactly as it was, which is the whole point. The
+  // `forward: true` option is what makes the pass-through work at all
+  // (without it the window still eats every click, just invisibly).
+  function stopClickThroughPoll() {
+    if (clickThroughPoll) {
+      clearInterval(clickThroughPoll);
+      clickThroughPoll = null;
+    }
+  }
+
+  function restoreFromClickThrough(win) {
+    stopClickThroughPoll();
+    if (!win.isDestroyed()) {
+      win.setOpacity(1);
+      win.setIgnoreMouseEvents(false);
+    }
+  }
+
+  ipcMain.handle("window:set-clickthrough", (event, enabled) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return;
+
+    if (!enabled) {
+      restoreFromClickThrough(win);
+      return;
+    }
+
+    win.setOpacity(0);
+    win.setIgnoreMouseEvents(true, { forward: true });
+
+    // The renderer's own keyup (App.tsx) still fires and calls this same
+    // handler with enabled=false, but only while this window still has
+    // focus — which stops being true the instant the user clicks whatever
+    // they were trying to reach behind it. This poll is what makes release
+    // still work after that: GetAsyncKeyState reads Shift's real hardware
+    // state regardless of focus, so the moment it's no longer held, this
+    // notices within one tick and restores — even if the other app now owns
+    // the keyboard. 80ms is imperceptible as a delay but cheap enough to
+    // poll indefinitely (a bare syscall, not real work).
+    stopClickThroughPoll();
+    clickThroughPoll = setInterval(() => {
+      if (!isShiftPhysicallyDown()) restoreFromClickThrough(win);
+    }, 80);
+  });
+
+  // --- Manual edge/corner resize (Clear mode only) --------------------------
+  // Backs src/components/ResizeHandles.tsx: it does the drag math using
+  // screen-space pointer coordinates (immune to the pointer capture that
+  // keeps the drag tracking once the cursor leaves the window), and calls
+  // this on every pointermove to actually move the native window's edge.
+  // Clamped to the same floor createWindow() itself enforces, since
+  // setBounds() doesn't respect minWidth/minHeight the way interactive
+  // native resizing does.
+  ipcMain.handle("window:get-bounds", (event) => {
+    return BrowserWindow.fromWebContents(event.sender)?.getBounds() ?? null;
+  });
+
+  ipcMain.handle("window:set-bounds", (event, bounds) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || !bounds) return;
+    const width = Math.max(MIN_WINDOW_WIDTH, Math.round(Number(bounds.width) || 0));
+    const height = Math.max(MIN_WINDOW_HEIGHT, Math.round(Number(bounds.height) || 0));
+    const x = Math.round(Number(bounds.x) || 0);
+    const y = Math.round(Number(bounds.y) || 0);
+    win.setBounds({ x, y, width, height });
   });
 
   // --- "Move": pin the window on top -----------------------------------------
