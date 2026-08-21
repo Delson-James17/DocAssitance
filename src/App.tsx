@@ -10,7 +10,7 @@ import { useTheme } from "./hooks/useTheme";
 import { askQuestion, askScreenshot as askScreenshotApi, type Persona, type PersonaPreset } from "./lib/api";
 import { DUPLICATE_THRESHOLD, similarity } from "./lib/dedupe";
 import { findRelatedContext, matchSavedQa } from "./lib/qaMatch";
-import { downloadQaTranscript, downloadTranscript } from "./lib/transcript";
+import { buildTranscript, downloadQaTranscript, downloadTranscript } from "./lib/transcript";
 import type { RecordEntry } from "./types";
 
 // How close a spoken line has to be to the answer on screen before it's taken
@@ -36,6 +36,9 @@ interface DesktopWindow {
   getBounds: () => Promise<{ x: number; y: number; width: number; height: number } | null>;
   setBounds: (bounds: { x: number; y: number; width: number; height: number }) => Promise<void>;
   setClickThrough: (enabled: boolean) => Promise<void>;
+  /** @returns unsubscribe */
+  onBeforeClose: (handler: () => void | Promise<void>) => () => void;
+  saveLogsAndClose: (payload: { fullText: string; qaText: string }) => Promise<void>;
 }
 
 type WindowMaterial = "acrylic" | "clear";
@@ -542,6 +545,29 @@ export default function App() {
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("contextmenu", onContextMenu);
     };
+  }, []);
+
+  // Auto-save this session's logs on close (desktop only) — silent, no
+  // confirmation dialog. A ref rather than a dependency on `record` itself:
+  // this only needs whatever the record happens to be at the moment the
+  // window is actually closing, and re-registering the underlying IPC
+  // listener on every transcribed word (record changes constantly while
+  // listening) would be wasteful for an effect that fires exactly once.
+  const recordRef = useRef(record);
+  useEffect(() => {
+    recordRef.current = record;
+  }, [record]);
+
+  useEffect(() => {
+    if (!desktopWindow) return;
+    return desktopWindow.onBeforeClose(async () => {
+      const current = recordRef.current;
+      const qaEntries = current.filter((e): e is Extract<RecordEntry, { kind: "qa" }> => e.kind === "qa");
+      await desktopWindow!.saveLogsAndClose({
+        fullText: current.length > 0 ? buildTranscript(current) : "",
+        qaText: qaEntries.length > 0 ? buildTranscript(qaEntries) : "",
+      });
+    });
   }, []);
 
   const busy = record.some((e) => e.kind === "qa" && e.pending);

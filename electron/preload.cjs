@@ -27,6 +27,27 @@ contextBridge.exposeInMainWorld("desktop", {
     toggleMaximize: () => ipcRenderer.invoke("window:maximize"),
     close: () => ipcRenderer.invoke("window:close"),
     /**
+     * Registers the callback that runs once, right before the window
+     * actually closes (however that close was triggered — the close
+     * button, Alt+F4, closing from the taskbar). main.cjs intercepts the
+     * real close to give this a chance to run first; call saveLogsAndClose
+     * from inside it to let the close proceed.
+     * @param {() => void | Promise<void>} handler
+     * @returns {() => void} unsubscribe
+     */
+    onBeforeClose: (handler) => {
+      const listener = () => void handler();
+      ipcRenderer.on("app:will-close", listener);
+      return () => ipcRenderer.removeListener("app:will-close", listener);
+    },
+    /**
+     * Writes this session's logs (if any — either string may be empty) to
+     * the app's own logs folder, then lets the close that's been waiting on
+     * onBeforeClose's handler actually proceed.
+     * @param {{ fullText: string, qaText: string }} payload
+     */
+    saveLogsAndClose: (payload) => ipcRenderer.invoke("app:save-logs-and-close", payload),
+    /**
      * "Move": pins the window on top of every other window, so it stays
      * visible even after alt-tabbing away.
      * @returns {Promise<boolean>} whether the window is now pinned

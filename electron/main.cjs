@@ -283,6 +283,27 @@ function createWindow(url, material) {
     }
   });
 
+  // Auto-save on close: whatever's in this session's conversation record
+  // lives only in the renderer's React state, so closing has to be
+  // intercepted once to give it a chance to hand that over before the
+  // window actually goes away. win.close() below re-fires this same "close"
+  // event — __closeConfirmed is what lets it through the second time instead
+  // of looping. The timeout is a safety net for a renderer that never
+  // responds (crashed, still loading, whatever) — a save feature should
+  // never be the reason the app can't be closed at all.
+  win.__closeConfirmed = false;
+  win.on("close", (event) => {
+    if (win.__closeConfirmed) return;
+    event.preventDefault();
+    win.webContents.send("app:will-close");
+    setTimeout(() => {
+      if (!win.__closeConfirmed && !win.isDestroyed()) {
+        win.__closeConfirmed = true;
+        win.close();
+      }
+    }, 3000);
+  });
+
   // The mic prompt has no meaning here — there's no browser chrome to show
   // it in, and the user already granted the app permission at the OS level.
   // Only our own origin is trusted, and only for media.
@@ -367,6 +388,37 @@ if (!app.requestSingleInstanceLock()) {
 
   ipcMain.handle("window:close", (event) => {
     BrowserWindow.fromWebContents(event.sender)?.close();
+  });
+
+  // --- Auto-save conversation logs on close ---------------------------------
+  // Answers the "app:will-close" notification sent from the "close" handler
+  // above. App.tsx builds the actual log text (it owns the conversation
+  // record; this process never sees it otherwise) and hands over up to two
+  // plain-text blobs — the full conversation and, separately, just the Q&A
+  // exchanges — matching exactly what the existing "Full Log"/"Q&A" download
+  // buttons already produce (see src/lib/transcript.ts's buildTranscript).
+  // Silent by design: no dialog, no interruption, and nothing is written at
+  // all for an empty session (empty string means "there was nothing here").
+  ipcMain.handle("app:save-logs-and-close", (event, payload) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return;
+
+    try {
+      const fullText = (payload?.fullText ?? "").toString();
+      const qaText = (payload?.qaText ?? "").toString();
+      if (fullText || qaText) {
+        const logsDir = path.join(app.getPath("userData"), "logs");
+        fs.mkdirSync(logsDir, { recursive: true });
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        if (fullText) fs.writeFileSync(path.join(logsDir, `transcript-${stamp}.txt`), fullText, "utf8");
+        if (qaText) fs.writeFileSync(path.join(logsDir, `qa-transcript-${stamp}.txt`), qaText, "utf8");
+      }
+    } catch (err) {
+      console.warn("[desktop] could not auto-save logs on close:", err.message);
+    }
+
+    win.__closeConfirmed = true;
+    win.close();
   });
 
   // --- "Hold Shift to click through" ----------------------------------------
