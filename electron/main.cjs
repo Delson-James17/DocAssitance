@@ -624,6 +624,22 @@ if (!app.requestSingleInstanceLock()) {
     return true;
   });
 
+  // Opens the same folder app:save-logs-and-close writes to, in Explorer.
+  // Created on demand (mkdir) rather than only when it already exists —
+  // otherwise the very first click, before any session has ever closed
+  // with something to save, would open nothing.
+  ipcMain.handle("app:open-logs-folder", () => {
+    const logsDir = path.join(app.getPath("userData"), "logs");
+    try {
+      fs.mkdirSync(logsDir, { recursive: true });
+    } catch (err) {
+      console.warn("[desktop] could not create logs folder:", err.message);
+      return false;
+    }
+    void shell.openPath(logsDir);
+    return true;
+  });
+
   // --- Local speech-to-text -----------------------------------------------
   // Transcription runs in this process because whisper.cpp is a native binary
   // the renderer can't reach. The renderer captures the audio and segments it

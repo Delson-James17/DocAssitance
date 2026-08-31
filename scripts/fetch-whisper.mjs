@@ -7,7 +7,7 @@
 //
 //   npm run whisper:setup             # default model (base)
 //   npm run whisper:setup -- tiny     # faster, less accurate
-//   npm run whisper:setup -- small    # slower, best Filipino accuracy
+//   npm run whisper:setup -- small    # slower, most accurate
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";

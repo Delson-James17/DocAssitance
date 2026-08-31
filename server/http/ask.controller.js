@@ -1,5 +1,6 @@
 import { initSse } from "./sse.js";
 import { config } from "../config.js";
+import { CODE_LANGUAGE_PRESETS } from "../prompts.js";
 
 /**
  * Logs token usage and a rough cost estimate for one answer, so cost is
@@ -72,6 +73,53 @@ function cleanPersona(raw) {
   };
 }
 
+// Actual truncation to a hard length lives in prompts.js's
+// jobDescriptionInstruction (the two limits should agree, but that one is
+// the source of truth); trimming here is just to avoid carrying a huge
+// string through the rest of the request for no reason when it's empty or
+// clearly not one.
+function cleanJobDescription(raw) {
+  return (raw ?? "").toString().trim();
+}
+
+const CODE_LANGUAGE_PRESET_KEYS = new Set(["auto", "custom", ...CODE_LANGUAGE_PRESETS]);
+
+/**
+ * The code-language preset (and optional custom text) chosen in Settings.
+ * An unknown preset falls back to "auto" (no preference) rather than
+ * erroring — same reasoning as cleanPersona above.
+ *
+ * @param {unknown} raw
+ */
+function cleanCodeLanguage(raw) {
+  const preset = (raw?.preset ?? "auto").toString();
+  return {
+    preset: CODE_LANGUAGE_PRESET_KEYS.has(preset) ? preset : "auto",
+    custom: (raw?.custom ?? "").toString(),
+  };
+}
+
+// Recent Q&A exchanges the client is treating as "the current conversation"
+// (see src/App.tsx's historyRef), turned into real prior turns for Claude —
+// see claude.service.js's buildHistoryMessages. Capped on both axes (how
+// many exchanges, how long each string is) since every one of these is
+// resent on every follow-up question, and the client's own cap already
+// keeps this small in practice — this is a server-side backstop, not the
+// primary limit.
+const MAX_HISTORY_ENTRIES = 6;
+const MAX_HISTORY_TEXT_LENGTH = 4000;
+
+function cleanHistory(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((h) => ({
+      question: (h?.question ?? "").toString().trim().slice(0, MAX_HISTORY_TEXT_LENGTH),
+      answer: (h?.answer ?? "").toString().trim().slice(0, MAX_HISTORY_TEXT_LENGTH),
+    }))
+    .filter((h) => h.question && h.answer)
+    .slice(-MAX_HISTORY_ENTRIES);
+}
+
 /**
  * HTTP handler that answers a question — typed/spoken text, or a screenshot
  * — from Claude's general knowledge, and streams the answer back as
@@ -104,6 +152,10 @@ export function createAskController({ claude }) {
 
     const context = cleanContext(req.body?.context);
     const persona = cleanPersona(req.body?.persona);
+    const short = req.body?.short === true;
+    const jobDescription = cleanJobDescription(req.body?.jobDescription);
+    const codeLanguage = cleanCodeLanguage(req.body?.codeLanguage);
+    const history = cleanHistory(req.body?.history);
 
     const sse = initSse(res);
     try {
@@ -113,8 +165,12 @@ export function createAskController({ claude }) {
             mediaType: image.mediaType,
             context,
             persona,
+            short,
+            jobDescription,
+            codeLanguage,
+            history,
           })
-        : claude.streamAnswer({ question, context, persona });
+        : claude.streamAnswer({ question, context, persona, short, jobDescription, codeLanguage, history });
       stream.on("text", (delta) => sse.send("delta", { text: delta }));
 
       const final = await stream.finalMessage();

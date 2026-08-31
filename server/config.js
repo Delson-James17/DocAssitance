@@ -9,7 +9,12 @@ export const config = {
 
   // Claude
   model: "claude-sonnet-5",
-  maxAnswerTokens: 1024,
+  // Raised from 1024: a full code solution plus a genuine line-by-line
+  // explanation (see SYSTEM_PROMPT's code rule) easily runs past that and
+  // would get cut off mid-explanation — an answer stopping abruptly reads
+  // as far more broken than a short conversational answer ever costs extra
+  // to allow room for.
+  maxAnswerTokens: 4096,
 
   // Standard (non-introductory) Sonnet 5 rates, per million tokens — used
   // only for the rough cost estimate logged after each answer. Deliberately

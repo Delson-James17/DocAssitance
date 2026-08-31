@@ -88,10 +88,46 @@ export interface AskContextEntry {
   answer: string;
 }
 
+// Recent Q&A exchanges sent as real prior conversation turns (not just
+// stuffed into the current message) so a follow-up question — "explain
+// that more", "why line 3" — gets answered with actual context instead of
+// Claude seeing it in isolation. See App.tsx's historyRef for how this is
+// built up, and claude.service.js's buildHistoryMessages for how it's used.
+export interface HistoryEntry {
+  question: string;
+  answer: string;
+}
+
 export type PersonaPreset = "default" | "professional" | "friendly" | "jolly" | "custom";
 
 export interface Persona {
   preset: PersonaPreset;
+  /** Only used when preset is "custom". */
+  custom: string;
+}
+
+// Kept in sync with CODE_LANGUAGE_PRESETS in server/prompts.js — that's the
+// source of truth for what each preset actually means, this is just the
+// client-side list of valid choices.
+export const CODE_LANGUAGE_PRESETS = [
+  "JavaScript",
+  "TypeScript",
+  "Python",
+  "Java",
+  "C#",
+  "C++",
+  "C",
+  "Go",
+  "PHP",
+  "Ruby",
+  "Swift",
+  "Kotlin",
+] as const;
+
+export type CodeLanguagePreset = "auto" | (typeof CODE_LANGUAGE_PRESETS)[number] | "custom";
+
+export interface CodeLanguage {
+  preset: CodeLanguagePreset;
   /** Only used when preset is "custom". */
   custom: string;
 }
@@ -145,11 +181,15 @@ export async function askQuestion(
   handlers: AskHandlers,
   context: AskContextEntry[] = [],
   persona?: Persona,
+  short?: boolean,
+  jobDescription?: string,
+  codeLanguage?: CodeLanguage,
+  history?: HistoryEntry[],
 ): Promise<void> {
   const res = await fetch("/api/ask", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question, context, persona }),
+    body: JSON.stringify({ question, context, persona, short, jobDescription, codeLanguage, history }),
   });
   await consumeAskStream(res, handlers);
 }
@@ -164,6 +204,10 @@ export async function askScreenshot(
   handlers: AskHandlers,
   context: AskContextEntry[] = [],
   persona?: Persona,
+  short?: boolean,
+  jobDescription?: string,
+  codeLanguage?: CodeLanguage,
+  history?: HistoryEntry[],
 ): Promise<void> {
   const match = /^data:([^;]+);base64,(.*)$/s.exec(dataUrl);
   if (!match) {
@@ -175,7 +219,15 @@ export async function askScreenshot(
   const res = await fetch("/api/ask", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ image: { mediaType, data }, context, persona }),
+    body: JSON.stringify({
+      image: { mediaType, data },
+      context,
+      persona,
+      short,
+      jobDescription,
+      codeLanguage,
+      history,
+    }),
   });
   await consumeAskStream(res, handlers);
 }

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { startMic, type MicSession } from "../lib/mic";
 import { startSystemAudio } from "../lib/systemAudio";
-import { detectSpeechLang, type SpeechLang } from "../lib/detectLang";
 
 /**
  * Where speech comes from.
@@ -33,11 +32,12 @@ export type AudioSource = "headset" | "mic";
 // current utterance ("…" while speaking, "" otherwise) instead of a partial
 // transcript. Everything else about the hook's shape is unchanged.
 
-/** Whisper wants ISO-639-1; the app tracks BCP-47 for display. */
-const WHISPER_LANG: Record<SpeechLang, string> = {
-  "en-US": "en",
-  "fil-PH": "tl",
-};
+// Whisper is always told to expect English (ISO-639-1 "en") rather than
+// auto-detecting or switching languages mid-session. Forcing the language
+// is also the more accurate setting for English speech specifically —
+// language auto-detection is itself a source of transcription errors, and
+// this app no longer needs to recognise Filipino/Tagalog at all.
+const WHISPER_LANGUAGE = "en";
 
 /**
  * Hard ceiling on a single message, so an uninterrupted monologue eventually
@@ -69,19 +69,14 @@ interface UseSpeechRecognition {
   /** "…" while an utterance is in progress — see the note above. */
   interim: string;
   finalText: string;
-  /** Which language the recognizer is currently listening for — adapts
-   * automatically based on what gets transcribed (see detectLang.ts). */
-  activeLang: SpeechLang;
   /** Why speech is unavailable, or the last recognition error. */
   error: string | null;
   toggle: () => void;
 }
 
 // Continuously transcribes speech and calls `onFinalUtterance` for each
-// completed sentence. Automatically switches between English and Filipino
-// recognition based on the language each utterance looks like — Whisper is
-// told which language to expect, so this adapts going forward rather than
-// detecting both simultaneously.
+// completed sentence. Whisper is always told to expect English — see
+// WHISPER_LANGUAGE above.
 export interface SpeechOptions {
   /** Re-transcribe speech as it's spoken. Costs CPU — see useAppearance. */
   liveCaption?: boolean;
@@ -98,7 +93,6 @@ export function useSpeechRecognition(
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState("");
   const [finalText, setFinalText] = useState("");
-  const [activeLang, setActiveLang] = useState<SpeechLang>("en-US");
   const [error, setError] = useState<string | null>(null);
 
   const sessionRef = useRef<MicSession | null>(null);
@@ -138,9 +132,6 @@ export function useSpeechRecognition(
   // effect on the next Play rather than needing anything else to change.
   const sourceRef = useRef<AudioSource>("headset");
   sourceRef.current = options.source ?? "headset";
-  // Read inside the audio callback, which outlives any single render.
-  const langRef = useRef<SpeechLang>(activeLang);
-  langRef.current = activeLang;
   const callbackRef = useRef(onFinalUtterance);
   callbackRef.current = onFinalUtterance;
 
@@ -225,11 +216,6 @@ export function useSpeechRecognition(
 
     setFinalText((prev) => prev + message + " ");
     callbackRef.current(message);
-
-    // Adapt the recognition language for the *next* message based on what
-    // this one looked like.
-    const detected = detectSpeechLang(message);
-    setActiveLang((current) => (detected !== current ? detected : current));
   }, []);
 
   /**
@@ -279,7 +265,7 @@ export function useSpeechRecognition(
       // hands anything over again — it just looks broken.
       let result: { text?: string; error?: string };
       try {
-        result = await speech.transcribe(wav, WHISPER_LANG[langRef.current]);
+        result = await speech.transcribe(wav, WHISPER_LANGUAGE);
       } catch (err) {
         result = { error: (err as Error).message };
       } finally {
@@ -324,7 +310,7 @@ export function useSpeechRecognition(
 
       partialBusyRef.current = true;
       try {
-        const result = await speech.transcribe(wav, WHISPER_LANG[langRef.current]);
+        const result = await speech.transcribe(wav, WHISPER_LANGUAGE);
         // A real transcription landed while this was running — it supersedes
         // the guess, so throw the stale preview away.
         if (pendingRef.current > 0 || !speakingRef.current) return;
@@ -425,5 +411,5 @@ export function useSpeechRecognition(
       });
   }, [handleUtterance, handlePartial, scheduleFlush, refreshInterim]);
 
-  return { supported, starting, listening, interim, finalText, activeLang, error, toggle };
+  return { supported, starting, listening, interim, finalText, error, toggle };
 }

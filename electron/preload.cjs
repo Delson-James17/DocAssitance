@@ -19,6 +19,13 @@ contextBridge.exposeInMainWorld("desktop", {
   },
   /** Opens a URL in the user's default browser instead of in the app. */
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
+  /**
+   * Opens the auto-saved logs folder (see app:save-logs-and-close on close)
+   * in Explorer. Creates the folder first if no session has ever closed
+   * with something to save yet, so this never opens nothing.
+   * @returns {Promise<boolean>}
+   */
+  openLogsFolder: () => ipcRenderer.invoke("app:open-logs-folder"),
 
   // The window is frameless, so the app's own title bar drives these.
   window: {

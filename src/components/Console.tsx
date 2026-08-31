@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CODE_LANGUAGE_PRESETS, type CodeLanguagePreset } from "../lib/api";
 import type { RecordEntry } from "../types";
 
 type QaSource = Extract<RecordEntry, { kind: "qa" }>["source"];
@@ -41,7 +42,6 @@ interface Props {
   onToggleMic: () => void;
   audioSource: "headset" | "mic";
   onToggleAudioSource: () => void;
-  speechLang: "en-US" | "fil-PH";
   record: RecordEntry[];
   onAsk: (question: string) => void;
   onScreenshot: () => void;
@@ -51,6 +51,11 @@ interface Props {
   onToggleAi: () => void;
   onDownload: () => void;
   onDownloadQa: () => void;
+  /** Undefined in the web build — there's no local logs folder to open. */
+  onOpenLogsFolder?: () => void;
+  /** Forces any code Claude writes into this language — "auto" leaves it to Claude's own judgment. */
+  codeLanguagePreset: CodeLanguagePreset;
+  onCodeLanguagePreset: (preset: CodeLanguagePreset) => void;
   onClear: () => void;
   qaCount: number;
   qaOpen: boolean;
@@ -66,7 +71,6 @@ export function Console({
   onToggleMic,
   audioSource,
   onToggleAudioSource,
-  speechLang,
   record,
   onAsk,
   onScreenshot,
@@ -75,6 +79,9 @@ export function Console({
   onToggleAi,
   onDownload,
   onDownloadQa,
+  onOpenLogsFolder,
+  codeLanguagePreset,
+  onCodeLanguagePreset,
   onClear,
   qaCount,
   qaOpen,
@@ -127,6 +134,20 @@ export function Console({
           >
             {aiEnabled ? "◉ AI: ON" : "○ AI: OFF"}
           </button>
+          <select
+            className="term-btn lang-select"
+            value={codeLanguagePreset}
+            onChange={(e) => onCodeLanguagePreset(e.target.value as CodeLanguagePreset)}
+            title="Forces any code Claude writes into this language, even if the question doesn't say which one — Auto leaves it to Claude's own judgment. Pick Custom, then set the language name in Settings."
+          >
+            <option value="auto">Code: Auto</option>
+            {CODE_LANGUAGE_PRESETS.map((lang) => (
+              <option key={lang} value={lang}>
+                Code: {lang}
+              </option>
+            ))}
+            <option value="custom">Code: Custom…</option>
+          </select>
           <button
             className="term-btn"
             title="Download just the Q&A exchanges as .txt — no notes or misheard fragments"
@@ -143,6 +164,15 @@ export function Console({
           >
             ⭳ Full Log
           </button>
+          {onOpenLogsFolder ? (
+            <button
+              className="term-btn"
+              title="Open the folder where session logs are auto-saved when you close the app"
+              onClick={onOpenLogsFolder}
+            >
+              📂 Logs
+            </button>
+          ) : null}
           <button
             className="link-btn"
             title="Clear the whole conversation record"
@@ -298,13 +328,6 @@ export function Console({
         >
           📷
         </button>
-
-        <span
-          className="lang-badge"
-          title={`Auto-detected speech language: ${speechLang === "en-US" ? "English" : "Filipino"} — adapts automatically as you talk`}
-        >
-          [{speechLang === "en-US" ? "EN" : "FIL"}]
-        </span>
 
         <input
           className="cmd-input"

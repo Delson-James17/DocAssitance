@@ -36,13 +36,13 @@ Ask mode (❓) or a typed question ───────────────
                     Nothing free could answer it — say so
 ```
 
-- **Speech-to-text runs locally**, via [whisper.cpp](https://github.com/ggml-org/whisper.cpp) in the desktop app ([`src/hooks/useSpeechRecognition.ts`](src/hooks/useSpeechRecognition.ts)). **No API key, no per-minute cost, no audio leaves the machine**, and it works offline. It **auto-detects English vs. Filipino/Tagalog** ([`src/lib/detectLang.ts`](src/lib/detectLang.ts)): after each utterance it checks for common Tagalog words and tells Whisper which language to expect for the *next* one — no manual toggle. The **`[EN]`/`[FIL]`** badge in the command bar shows which is currently active.
+- **Speech-to-text runs locally**, via [whisper.cpp](https://github.com/ggml-org/whisper.cpp) in the desktop app ([`src/hooks/useSpeechRecognition.ts`](src/hooks/useSpeechRecognition.ts)). **No API key, no per-minute cost, no audio leaves the machine**, and it works offline. Whisper is always told to expect **English** — forcing the language rather than auto-detecting it is also what makes English transcription itself more accurate, since language auto-detection is its own source of errors.
   - This replaced the browser's built-in Web Speech API, which **does not work in Electron**: Chrome's implementation calls a Google speech service using private API keys baked into official Chrome builds, so in Electron it fails immediately with a `network` error and there's no flag that enables it.
   - **Voice input is desktop-only.** whisper.cpp is a native binary the browser can't run, so the web build supports typed questions and saved Q&A but not the microphone. It says so rather than failing silently.
   - **There's no word-by-word interim text.** Whisper transcribes a *finished* utterance rather than a live stream, so the console shows a `…` indicator while you're speaking and the text lands when you stop. [`src/lib/mic.ts`](src/lib/mic.ts) decides where an utterance ends, using an energy gate: it collects audio while you're above an adaptive noise floor and flushes ~700ms after you go quiet.
   - **Silence is never transcribed.** Whisper doesn't return "nothing" for audio with no speech in it — it invents the most common thing from its training data, which is why an idle mic used to fill the log with "Thank you." and "Thanks for watching!". Three things prevent it: the mic only sends a segment containing at least 400ms of genuinely voiced audio; the engine is left free to emit its `[BLANK_AUDIO]` marker (passing `--suppress-nst` actively *causes* hallucinations, by forcing a real word out instead of the marker); and any transcript that comes back as a known artifact is dropped in [`electron/whisper.cjs`](electron/whisper.cjs).
 - **Plain listening (▶) never guesses.** Everything heard is transcribed as-is, including misheard/garbled fragments — there's no "does this sound like a question" heuristic trying (and sometimes failing) to decide what to answer. **Ask mode (❓)** is the explicit, reliable way to get a spoken question answered — see [Using it](#using-it) below.
-- **Language**: questions can be asked in English, Filipino/Tagalog, or a Taglish mix — Claude understands either and answers in English by default (see [`server/prompts.js`](server/prompts.js)).
+- **Language**: English only, end to end — speech is transcribed as English and Claude always answers in English (see [`server/prompts.js`](server/prompts.js)).
 - The backend holds your API key so it's never exposed to the browser.
 - **Saved Q&A** (**`[?]`** in the command bar) lets you type your own question/answer pairs and save them — a close match always wins over Claude, so you get a guaranteed-correct, zero-cost answer for anything you've curated, with no risk of Claude answering the wrong thing. Persisted in Supabase (a Postgres table) so it survives server restarts. Each entry can also list **alternates** — other ways the same question tends to get asked (e.g. "Walk me through your resume" for "Tell me about yourself?") — so differently-worded but same-meaning questions all match the one saved answer instead of only the exact wording you first typed.
 - **Bulk-import Q&A** from a `.csv` or `.json` file — see [Using it](#using-it) below.
@@ -197,12 +197,10 @@ Pick a different model if the default doesn't suit you:
 ```bash
 npm run whisper:setup -- tiny    #  75MB — fastest, least accurate
 npm run whisper:setup -- base    # 142MB — the default
-npm run whisper:setup -- small   # 466MB — slowest, best Filipino accuracy
+npm run whisper:setup -- small   # 466MB — slowest, most accurate
 ```
 
-Whisper's Tagalog is weakest at the small end, so `small` is worth the download
-if you use Filipino heavily. Only one model needs to be present; the app picks
-up whichever it finds.
+Only one model needs to be present; the app picks up whichever it finds.
 
 **Speed.** A 4-second question transcribes in about **1 second** on a Ryzen 5
 3500U (4 cores / 8 threads). Three things get it there, and they matter more
@@ -221,8 +219,8 @@ than the model choice:
 
 `tiny` is not a useful speed option — measured *slower* than `base` here and
 returned nothing at all for the same clip. If accuracy is the problem rather
-than speed (Filipino especially), `npm run whisper:setup -- small` is the lever
-to pull; expect roughly 2-3× the latency above.
+than speed, `npm run whisper:setup -- small` is the lever to pull; expect
+roughly 2-3× the latency above.
 
 **Prebuilt binaries exist for Windows and Linux x64.** On macOS, build
 whisper.cpp from source and drop `whisper-server` plus its libraries into
@@ -405,11 +403,7 @@ counterpart doesn't pay.
    tab has its own **`⭳ Q&A`** / **`⭳ Full Log`** download button at the
    top of the console, independent of which tab is currently showing. Both
    save a timestamped `.txt`.
-4. **Speak in Filipino/Tagalog** — just talk; no setup needed. The **`[EN]`/`[FIL]`**
-   badge next to the mic button shows what it's currently listening for and
-   switches on its own as your speech shifts between languages. Either way,
-   Claude understands the question and answers in English.
-5. **Save your own Q&A** — click **`[?]`** in the command bar to open the
+4. **Save your own Q&A** — click **`[?]`** in the command bar to open the
    Saved Q&A drawer. Type a question and its exact answer, **`+ Save Q&A`**
    persists it. From then on, asking that question (or a close rewording)
    answers instantly from what you wrote — shown with a **`Saved`** badge —
@@ -418,10 +412,10 @@ counterpart doesn't pay.
    other real phrasings of the same question — e.g. "Can you introduce
    yourself?", "Walk me through your resume." — so all of them match the
    same saved answer, not just the exact wording you typed first.
-6. **Search saved Q&A** — the search box in the drawer filters by keyword
+5. **Search saved Q&A** — the search box in the drawer filters by keyword
    against the question text (every typed word must appear somewhere in the
    question, in any order) — handy once you've got more than a handful saved.
-7. **Bulk-import Q&A** — click **`⭱ Import`** in the Saved Q&A drawer and
+6. **Bulk-import Q&A** — click **`⭱ Import`** in the Saved Q&A drawer and
    pick a `.csv` (header row `question,answer`, plus an optional `alternates`
    column) or `.json` file (an array of `{question, answer, alternates}`
    objects, or an object mapping questions to answers). `alternates` is a
@@ -436,7 +430,7 @@ counterpart doesn't pay.
    the `alternates` column specifically:
    [`samples/qa-alternates-template.csv`](samples/qa-alternates-template.csv),
    [`samples/qa-alternates-template.json`](samples/qa-alternates-template.json).
-8. **Quick-recall keys** — for the questions you most need on hand, assign
+7. **Quick-recall keys** — for the questions you most need on hand, assign
    any saved entry a key via the **"Quick key"** dropdown next to it in the
    Saved Q&A drawer. Any digit (**`0-9`**) or letter (**`A-Z`**) works — 36
    entries can be reachable at once — and the dropdown is laid out like the
@@ -449,7 +443,7 @@ counterpart doesn't pay.
    can hold a given key at a time; assigning it elsewhere takes it from
    whoever had it. This and the **`.`** / **space** shortcuts below work
    anywhere in the app except while a text field has focus.
-9. **Keyboard shortcuts** — **`.`** toggles the round **▶** record button,
+8. **Keyboard shortcuts** — **`.`** toggles the round **▶** record button,
    and **space** toggles **❓** ask mode, exactly like clicking them — handy
    for switching without reaching for the mouse mid-practice. Both are
    ignored while typing in the command bar or the Saved Q&A drawer, so

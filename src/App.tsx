@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Console } from "./components/Console";
 import { QaPanel } from "./components/QaPanel";
 import { ResizeHandles } from "./components/ResizeHandles";
@@ -7,7 +7,15 @@ import { useAppearance } from "./hooks/useAppearance";
 import { useQa } from "./hooks/useQa";
 import { useSpeechRecognition } from "./hooks/useSpeechRecognition";
 import { useTheme } from "./hooks/useTheme";
-import { askQuestion, askScreenshot as askScreenshotApi, type Persona, type PersonaPreset } from "./lib/api";
+import {
+  askQuestion,
+  askScreenshot as askScreenshotApi,
+  type CodeLanguage,
+  type CodeLanguagePreset,
+  type HistoryEntry,
+  type Persona,
+  type PersonaPreset,
+} from "./lib/api";
 import { DUPLICATE_THRESHOLD, similarity } from "./lib/dedupe";
 import { findRelatedContext, matchSavedQa } from "./lib/qaMatch";
 import { buildTranscript, downloadQaTranscript, downloadTranscript } from "./lib/transcript";
@@ -19,9 +27,29 @@ import type { RecordEntry } from "./types";
 // paraphrases, stumbles and skips words, so the match is never exact.
 const ANSWER_ECHO_THRESHOLD = 0.45;
 
+// How many recent exchanges ride along as real conversation turns so a
+// follow-up ("explain that more", "why line 3") gets answered with the
+// actual prior context instead of in isolation — see historyRef below.
+// Small on purpose: every entry here is resent on *every* later question
+// until it ages out, so this trades a bit of follow-up "memory" for
+// bounded per-question cost.
+const MAX_HISTORY = 3;
+
 interface CachedAnswer {
   question: string;
   answer: string;
+  /**
+   * A fingerprint of both the answer-shaping settings (persona, short
+   * answers, job description, code language) *and* the conversation history
+   * active when this was generated — see the cacheKey built in ask() below.
+   * A cache hit requires this to match the *current* value of both, not
+   * just a similar question: settings changing (switching C# to JavaScript
+   * and re-asking the same problem) or the conversation context differing
+   * (the same short follow-up text means something different in a different
+   * conversation) would otherwise silently hand back a stale answer instead
+   * of asking Claude again properly.
+   */
+  settingsKey: string;
 }
 
 interface DesktopWindow {
@@ -64,6 +92,13 @@ interface DesktopScreenshot {
 const desktopScreenshot: DesktopScreenshot | undefined = (
   window as unknown as { desktop?: { screenshot?: DesktopScreenshot } }
 ).desktop?.screenshot;
+
+// Opens the folder session logs are auto-saved to on close (see the
+// onBeforeClose handler below). Desktop-only — the web build has nothing on
+// disk for this to point at.
+const desktopOpenLogsFolder: (() => Promise<boolean>) | undefined = (
+  window as unknown as { desktop?: { openLogsFolder?: () => Promise<boolean> } }
+).desktop?.openLogsFolder;
 
 function newId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -159,6 +194,68 @@ export default function App() {
   }, []);
   const persona: Persona = { preset: personaPreset, custom: personaCustom };
 
+  // Independent of tone: a short answer can still be Professional, Jolly,
+  // etc. — see server/prompts.js's SHORT_ANSWER_INSTRUCTION for what this
+  // actually asks Claude to do (a one-line summary instead of an explanation).
+  const [shortAnswers, setShortAnswersState] = useState<boolean>(
+    () => localStorage.getItem("shortAnswers") === "on",
+  );
+  const setShortAnswers = useCallback((value: boolean) => {
+    setShortAnswersState(value);
+    localStorage.setItem("shortAnswers", value ? "on" : "off");
+  }, []);
+
+  // A pasted job posting — sent with every question so personal/interview
+  // answers get tailored toward it (which skills/experience to lead with,
+  // language to echo). See server/prompts.js's jobDescriptionInstruction for
+  // what this actually tells Claude to do with it; empty by default and
+  // ignored entirely by the server when blank, so this costs nothing until
+  // something's actually pasted in.
+  const [jobDescription, setJobDescriptionState] = useState<string>(
+    () => localStorage.getItem("jobDescription") ?? "",
+  );
+  const setJobDescription = useCallback((value: string) => {
+    setJobDescriptionState(value);
+    localStorage.setItem("jobDescription", value);
+  }, []);
+
+  // Which language Claude writes code in for coding-style questions ("solve
+  // this problem", "write a function that…") — a preset, or "custom" for
+  // anything not listed. "auto" (the default) leaves Claude's own judgment
+  // alone; the actual instruction text for each preset lives server-side
+  // (server/prompts.js's codeLanguageInstruction) for one source of truth.
+  const [codeLanguagePreset, setCodeLanguagePresetState] = useState<CodeLanguagePreset>(
+    () => (localStorage.getItem("codeLanguagePreset") as CodeLanguagePreset | null) ?? "auto",
+  );
+  const [codeLanguageCustom, setCodeLanguageCustomState] = useState<string>(
+    () => localStorage.getItem("codeLanguageCustom") ?? "",
+  );
+  const setCodeLanguagePreset = useCallback((preset: CodeLanguagePreset) => {
+    setCodeLanguagePresetState(preset);
+    localStorage.setItem("codeLanguagePreset", preset);
+  }, []);
+  const setCodeLanguageCustom = useCallback((custom: string) => {
+    setCodeLanguageCustomState(custom);
+    localStorage.setItem("codeLanguageCustom", custom);
+  }, []);
+  const codeLanguage: CodeLanguage = { preset: codeLanguagePreset, custom: codeLanguageCustom };
+
+  // Fingerprint of every setting that changes how an answer is *shaped*
+  // (not what it says) — see CachedAnswer's settingsKey for why the answer
+  // cache below needs this rather than just matching on question text.
+  const settingsKey = useMemo(
+    () =>
+      JSON.stringify([
+        personaPreset,
+        personaCustom,
+        shortAnswers,
+        jobDescription,
+        codeLanguagePreset,
+        codeLanguageCustom,
+      ]),
+    [personaPreset, personaCustom, shortAnswers, jobDescription, codeLanguagePreset, codeLanguageCustom],
+  );
+
   // Which device speech is captured from. "headset" loops back system audio
   // (see systemAudio.ts) — it only works cleanly with headphones, since
   // otherwise the speakers' own output leaks back into the mic. "mic"
@@ -189,6 +286,16 @@ export default function App() {
   // rewording of a) question is free whether AI is currently on or off,
   // since no new call is made either way.
   const answerCacheRef = useRef<CachedAnswer[]>([]);
+
+  // The last few exchanges (any source — saved, cached, or Claude), sent as
+  // real prior conversation turns on the *next* question — see MAX_HISTORY
+  // above and HistoryEntry in lib/api.ts. A ref rather than state: it's read
+  // at ask-time, not rendered, and doesn't need to trigger anything.
+  const historyRef = useRef<HistoryEntry[]>([]);
+  const pushHistory = useCallback((question: string, answer: string) => {
+    if (!answer) return;
+    historyRef.current = [...historyRef.current, { question, answer }].slice(-MAX_HISTORY);
+  }, []);
 
   const pushQa = useCallback(
     (fields: Omit<Extract<RecordEntry, { kind: "qa" }>, "id" | "kind" | "timestamp">) => {
@@ -222,17 +329,26 @@ export default function App() {
   // off, there's nothing left that can answer it for free, so say so.
   const ask = useCallback(
     (question: string) => {
+      // Folds in the current conversation history, not just the answer-
+      // shaping settings: two occurrences of the same short follow-up
+      // ("explain that more") asked in different conversations don't mean
+      // the same thing, so a cache hit needs the *context* to match too,
+      // not just the words.
+      const cacheKey = settingsKey + JSON.stringify(historyRef.current);
+
       const savedMatch = matchSavedQa(qa.entries, question);
       if (savedMatch) {
         pushQa({ question, answer: savedMatch.answer, pending: false, source: "saved" });
+        pushHistory(question, savedMatch.answer);
         return;
       }
 
       const cached = answerCacheRef.current.find(
-        (c) => similarity(c.question, question) >= DUPLICATE_THRESHOLD,
+        (c) => c.settingsKey === cacheKey && similarity(c.question, question) >= DUPLICATE_THRESHOLD,
       );
       if (cached) {
         pushQa({ question, answer: cached.answer, pending: false, source: "cache" });
+        pushHistory(question, cached.answer);
         return;
       }
 
@@ -255,6 +371,11 @@ export default function App() {
       // instead of inventing an unrelated persona. Unrelated questions
       // naturally find none, so cost is unaffected for those.
       const context = findRelatedContext(qa.entries, question);
+      // Snapshot now, not read fresh inside onDone — this is what the
+      // question was actually answered *with*, and has to be the same
+      // reference tagged onto the cache entry below for cacheKey to mean
+      // anything.
+      const history = historyRef.current;
 
       void askQuestion(
         question,
@@ -267,8 +388,9 @@ export default function App() {
             ),
           onDone: (answer) => {
             patchQa(id, { pending: false, answer });
+            pushHistory(question, answer);
             answerCacheRef.current = [
-              { question, answer },
+              { question, answer, settingsKey: cacheKey },
               ...answerCacheRef.current,
             ].slice(0, 50);
           },
@@ -276,9 +398,24 @@ export default function App() {
         },
         context,
         persona,
+        shortAnswers,
+        jobDescription,
+        codeLanguage,
+        history,
       );
     },
-    [aiEnabled, qa.entries, pushQa, patchQa, persona],
+    [
+      aiEnabled,
+      qa.entries,
+      pushQa,
+      patchQa,
+      pushHistory,
+      persona,
+      shortAnswers,
+      jobDescription,
+      codeLanguage,
+      settingsKey,
+    ],
   );
 
   // A question read visually (a shared doc, a coding platform, a slide)
@@ -329,14 +466,21 @@ export default function App() {
                 e.id === id && e.kind === "qa" ? { ...e, answer: e.answer + text } : e,
               ),
             ),
-          onDone: (answer) => patchQa(id, { pending: false, answer }),
+          onDone: (answer) => {
+            patchQa(id, { pending: false, answer });
+            pushHistory("📷 Screenshot", answer);
+          },
           onError: (message) => patchQa(id, { pending: false, error: message }),
         },
         [],
         persona,
+        shortAnswers,
+        jobDescription,
+        codeLanguage,
+        historyRef.current,
       );
     })();
-  }, [aiEnabled, pushQa, patchQa, persona]);
+  }, [aiEnabled, pushQa, patchQa, pushHistory, persona, shortAnswers, jobDescription, codeLanguage]);
 
   // The most recent answer shown, so it can be recognised if it's read back
   // out loud. See the echo check in onFinalUtterance.
@@ -370,7 +514,6 @@ export default function App() {
     starting,
     listening,
     interim,
-    activeLang,
     error: speechError,
     toggle,
   } = useSpeechRecognition(onFinalUtterance, {
@@ -580,6 +723,7 @@ export default function App() {
     if (!window.confirm("Clear the whole conversation record? This can't be undone.")) return;
     setRecord([]);
     answerCacheRef.current = [];
+    historyRef.current = [];
   }, [record.length]);
 
   return (
@@ -676,7 +820,6 @@ export default function App() {
           onToggleMic={toggleListening}
           audioSource={audioSource}
           onToggleAudioSource={toggleAudioSource}
-          speechLang={activeLang}
           record={record}
           onAsk={ask}
           onScreenshot={askScreenshot}
@@ -685,6 +828,9 @@ export default function App() {
           onToggleAi={toggleAi}
           onDownload={() => downloadTranscript(record)}
           onDownloadQa={() => downloadQaTranscript(record)}
+          onOpenLogsFolder={desktopOpenLogsFolder ? () => void desktopOpenLogsFolder() : undefined}
+          codeLanguagePreset={codeLanguagePreset}
+          onCodeLanguagePreset={setCodeLanguagePreset}
           onClear={handleClear}
           qaCount={qa.entries.length}
           qaOpen={qaOpen}
@@ -730,6 +876,13 @@ export default function App() {
       personaCustom={personaCustom}
       onPersonaPreset={setPersona}
       onPersonaCustom={setPersonaCustom}
+      shortAnswers={shortAnswers}
+      onShortAnswers={setShortAnswers}
+      jobDescription={jobDescription}
+      onJobDescription={setJobDescription}
+      codeLanguagePreset={codeLanguagePreset}
+      codeLanguageCustom={codeLanguageCustom}
+      onCodeLanguageCustom={setCodeLanguageCustom}
     />
     </>
   );
